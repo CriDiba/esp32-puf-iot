@@ -1,0 +1,6 @@
+# vs-code settings
+.vscode
+
+# build outputs
+build
+cmake-build-debug
