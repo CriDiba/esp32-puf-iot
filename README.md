@@ -1,4 +1,4 @@
-# ESP-32 SRAM PUF for IoT
+# ESP32 SRAM PUF for IoT
 
 This repo contains a firmware for IoT devices based on ESP32 platform. The project implements a software-based SRAM PUF (Physically Unclonable Function) that can be used to generate a unique value. This value can then be utilized to implement security primitives. The project aims to provide a secure and reliable way of storing and transmitting data in IoT devices.
 
@@ -65,7 +65,7 @@ idf.py -p PORT flash
 
 Replace `PORT` with your ESP32 board’s serial port name.
 
-#### Monitor
+### Monitoring
 
 To run the serial monitor (IDF monitor) you can do as follow:
 
