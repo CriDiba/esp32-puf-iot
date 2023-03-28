@@ -17,6 +17,9 @@
 #include <lwip/netdb.h>
 
 #include <stdbool.h>
+#include <string.h>
+
+#define MAX_ARGUMENTS 32
 
 static const char *TAG = "TcpConsole";
 
@@ -25,67 +28,85 @@ static struct ConsoleCmd console_commands[] = {
     { .name = "enroll",        .handler = Console_CmdEnroll,       .help = "entroll the SRAM PUF"   },
 };
 
-void Console_CmdHelp(int argc, char *argv[]) 
+static void Console_vprintf(int socket, const char *fmt, va_list args)
+{    
+    char buffer[256];
+    int length = vsnprintf(buffer, sizeof(buffer), fmt, args);
+    send(socket,buffer, length, 0);
+}
+
+void Console_Println(int socket, const char *fmt, ...) 
+{
+    va_list args;
+    va_start(args, fmt);
+    Console_vprintf(socket, fmt, args);
+    send(socket, NEWLINE, sizeof(NEWLINE), 0);
+    va_end(args);
+}
+
+void Console_Printf(int socket, const char *fmt, ...) 
+{
+    va_list args;
+    va_start(args, fmt);
+    Console_vprintf(socket, fmt, args);
+    va_end(args);
+}
+
+void Console_CmdHelp(int socket, int argc, char *argv[]) 
 {
     (void)argc;
     (void)argv;
 
-    // TODO
-    // Console_Println(ctx, "Available commands:");
-    // for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++) 
-    //     Console_Println(ctx, "* %-15s - %s", console_commands[i].name, console_commands[i].help);
+    Console_Println(socket, "Available commands:");
+    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++) 
+        Console_Println(socket, "* %-15s - %s", console_commands[i].name, console_commands[i].help);
 
 }
 
-void Console_CmdEnroll(int argc, char *argv[])
+void Console_CmdEnroll(int socket, int argc, char *argv[])
 {
     // TODO: start enroll phase
 }
 
-void Console_RunCommand(ConsoleCtx *ctx, char *command)
+void Console_RunCommand(const int socket, char *command)
 {
-    // int argc = 0;
-    // char *ptr = NULL;
-    // char *argv[MAX_ARGUMENTS];
-    // argv[argc++] = strtok_r(command, " \t", &ptr);
-    // while (argc < MAX_ARGUMENTS && (argv[argc++] = strtok_r(NULL, " \t", &ptr)));
-    // argc--;
+    int argc = 0;
+    char *ptr = NULL;
+    char *argv[MAX_ARGUMENTS];
+    argv[argc++] = strtok_r(command, " \t", &ptr);
+    while (argc < MAX_ARGUMENTS && (argv[argc++] = strtok_r(NULL, " \t", &ptr)));
+    argc--;
 
-    // if (!argv[0])
-    //     return FAILURE;
+    if (!argv[0])
+        return;
 
-    // for (size_t i = 0; i < ARRAY_SIZE(g_commands); i++) 
-    // {
-    //     if (!strcmp(g_commands[i].name, argv[0])) 
-    //     {
-    //         D("console: matched command: %s", g_commands[i].name);
-    //         ErrorCode error = g_commands[i].handler(ctx, argc, argv);
-    //         if (error) 
-    //             Console_Println(ctx, "-ERR: %s (%d)", ErrorToString(error), error);
-    //         else 
-    //             Console_Println(ctx, "+OK");
-
-    //         return error;
-    //     }
-    // }
+    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++) 
+    {
+        if (!strcmp(console_commands[i].name, argv[0])) 
+        {
+            ESP_LOGI(TAG, "received command: %s", command);
+            console_commands[i].handler(socket, argc, argv);
+            Console_Println(socket, "+OK");
+            return;
+        }
+    }
     
-    // Console_Println(ctx, "-ERR: Unknown command %s", argv[0]);
-
-    // return FAILURE;
+    Console_Println(socket, "-ERR: Unknown command %s", argv[0]);
 }
 
 static void Console_GetCommand(const int socket)
 {
     int length;
     char cmd[128];
-
+    
     do
     {
+        Console_Printf(socket, PROMPT);
         length = recv(socket, cmd, sizeof(cmd) - 1, 0);
         if (length > 0)
         {
             cmd[length - 1] = '\0';
-            ESP_LOGI(TAG, "Received %d bytes: %s", length, cmd);
+            Console_RunCommand(socket, cmd);
         }
     } while (length > 0);
     
@@ -137,7 +158,7 @@ void Console_TcpConsoleTask(void *pvParameters)
 
     while (true)
     {
-        ESP_LOGI(TAG, "remote consle listening");
+        ESP_LOGI(TAG, "remote console listening");
 
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);

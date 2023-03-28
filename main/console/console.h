@@ -8,7 +8,7 @@
 #define PROMPT ">> "
 #define LINE_BUFFER_SIZE 512
 
-typedef void (*ConsoleCommandHandler)(int argc, char *argv[]);
+typedef void (*ConsoleCommandHandler)(int socket, int argc, char *argv[]);
 
 struct ConsoleCmd {
     const char *name;
@@ -18,12 +18,12 @@ struct ConsoleCmd {
 
 /* console commands */
 
-void Console_CmdHelp(int argc, char *argv[]);
-void Console_CmdEnroll(int argc, char *argv[]);
+void Console_CmdHelp(int socket, int argc, char *argv[]);
+void Console_CmdEnroll(int socket, int argc, char *argv[]);
 
-void Console_Printf(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-void Console_Println(const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+void Console_Printf(int socket, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+void Console_Println(int socket, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
-void Console_RunCommand(char *command);
+void Console_RunCommand(int socket, char *command);
 
 void Console_TcpConsoleTask(void *pvParameters);
