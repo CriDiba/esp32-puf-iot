@@ -4,3 +4,6 @@
 # build outputs
 build
 cmake-build-debug
+
+sdkconfig
+sdkconfig.old
