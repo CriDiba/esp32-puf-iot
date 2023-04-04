@@ -65,3 +65,19 @@ void set_blob(const uint8_t *blob, size_t length, const char *key) {
 
     nvs_close(my_handle);
 }
+
+bool check_key(const char *key)
+{
+    nvs_handle_t my_handle;
+    esp_err_t err = initialize_nvs(NVS_READWRITE, &my_handle);
+    ESP_ERROR_CHECK( err );
+
+    size_t length = 0;
+    err = nvs_get_blob(my_handle, key, NULL, &length);
+    if(err != ESP_OK) {
+        nvs_close(my_handle);
+        return false;
+    }
+
+    return true;
+}

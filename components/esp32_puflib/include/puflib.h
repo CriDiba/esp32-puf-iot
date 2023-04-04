@@ -69,5 +69,9 @@ void enroll_puf();
  */
 void puflib_wake_up_stub(void);
 
+/**
+ * Checks if puf is already enrolled and ecc data are in nvs
+*/
+bool is_puf_configured(void);
 
 #endif //ESP32_PUF_PUFLIB_H

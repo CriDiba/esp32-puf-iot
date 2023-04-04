@@ -1,18 +1,18 @@
-#include <stdio.h>
+#include "esp_err.h" // esp_err_t
+#include "nvs_flash.h" // nvs_flash_init
+#include "esp_netif.h" // esp_netif_init
+#include "esp_event.h" // esp_event_loop_create_default
+#include "esp_sleep.h" // esp_default_wake_deep_sleep
 
-#include "freertos/FreeRTOS.h" // portTICK_PERIOD_MS
-#include "freertos/task.h" // vTaskDelay
-#include "esp_system.h" // esp_restart
-#include "nvs_flash.h"
-#include "esp_netif.h"
-#include "esp_event.h"
+#include "core/core.h" // Core_TaskStart
 
-
-#include "net/wifi.h"
-#include "console/console.h"
+#include "puflib.h" // puflib_init
 
 void app_main(void)
 {
+    /* puflib handler */
+    puflib_init();
+
     /* initialization */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -23,12 +23,12 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* start wifi connection */
-    Wifi_Init();
+    /* start main task */
+    Core_TaskStart();    
+}
 
-    /* wait for connection */
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
-
-    /* start tcp console */
-    xTaskCreate(Console_TcpConsoleTask, "tcp-console", 4096, NULL, 5, NULL);
+void RTC_IRAM_ATTR esp_wake_deep_sleep(void) {
+    esp_default_wake_deep_sleep();
+    /* call puflib wake up to copy SRAM value in buffer */
+    puflib_wake_up_stub();
 }

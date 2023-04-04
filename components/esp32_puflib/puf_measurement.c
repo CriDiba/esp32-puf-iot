@@ -46,6 +46,11 @@ void puflib_init() {
     }
 }
 
+bool is_puf_configured(void)
+{
+    return check_key(PUF_MASK_KEY) && check_key(ECC_DATA_KEY);
+}
+
 void power_down_rtc_sram() {
     CLEAR_PERI_REG_MASK(RTC_CNTL_PWC_REG, RTC_CNTL_FASTMEM_FORCE_PU | RTC_CNTL_FASTMEM_FORCE_NOISO);
     SET_PERI_REG_MASK(RTC_CNTL_PWC_REG, RTC_CNTL_FASTMEM_FORCE_PD | RTC_CNTL_FASTMEM_FORCE_ISO);

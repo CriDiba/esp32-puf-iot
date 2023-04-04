@@ -1,6 +1,8 @@
 #include "console/console.h"
 
+#include "core/core.h"
 #include "define.h"
+#include "puflib.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,7 +16,7 @@
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
-#include <lwip/netdb.h>
+#include "lwip/netdb.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -24,8 +26,10 @@
 static const char *TAG = "TcpConsole";
 
 static struct ConsoleCmd console_commands[] = {
-    { .name = "help",          .handler = Console_CmdHelp,         .help = "show this help message" },
-    { .name = "enroll",        .handler = Console_CmdEnroll,       .help = "entroll the SRAM PUF"   },
+    { .name = "help",           .handler = Console_CmdHelp,         .help = "show this help message"            },
+    { .name = "enroll",         .handler = Console_CmdEnroll,       .help = "entroll the SRAM PUF"              },
+    { .name = "puf",            .handler = Console_CmdPrintPuf,     .help = "print SRAM PUF buffer"             },
+    { .name = "challenge",      .handler = Console_CmdChallenge,    .help = "trigger SRAM PUF with challenge"   }
 };
 
 static void Console_vprintf(int socket, const char *fmt, va_list args)
@@ -65,7 +69,40 @@ void Console_CmdHelp(int socket, int argc, char *argv[])
 
 void Console_CmdEnroll(int socket, int argc, char *argv[])
 {
-    // TODO: start enroll phase
+    Core_EventNotify(CORE_EVENT_ENROLL);
+    Console_Println(socket, "Start PUF enrollment");
+}
+
+void Console_CmdPrintPuf(int socket, int argc, char *argv[])
+{
+    bool puf_ok = get_puf_response();
+    if (PUF_STATE == RESPONSE_READY && puf_ok)
+    {
+        Console_Println(socket, "PUF Bytes: %d", PUF_RESPONSE_LEN);
+        for (size_t i = 0; i < PUF_RESPONSE_LEN; i++)
+        {
+            Console_Printf(socket, "%02X ", PUF_RESPONSE[i]);
+        }
+        Console_Println(socket, "\n");
+    }
+    else
+    {
+        Console_Println(socket, "PUF is not ready, enroll first");
+    }
+
+    clean_puf_response();
+}
+
+void Console_CmdChallenge(int socket, int argc, char *argv[])
+{
+    if (argc != 2)
+    {
+        Console_Println(socket, "usage: %s <challenge>", argv[0]);
+    }
+
+    char chall[STR_CHALL_MAX_LEN] = {0};
+    size_t length = snprintf(chall, STR_CHALL_MAX_LEN, "%s", argv[1]);
+    Core_EventNotifyData(CORE_EVENT_PUF_CHALLENGE, chall, length + 1);
 }
 
 void Console_RunCommand(const int socket, char *command)
@@ -113,8 +150,7 @@ static void Console_GetCommand(const int socket)
     ESP_LOGI(TAG, "client disconnected");
 }
 
-
-void Console_TcpConsoleTask(void *pvParameters)
+void Console_TaskTcpConsole(void *pvParameters)
 {
     ESP_LOGI(TAG, "open socket...");
 
@@ -190,4 +226,9 @@ void Console_TcpConsoleTask(void *pvParameters)
 failure:
     close(server_socket);
     vTaskDelete(NULL);
+}
+
+void Console_TaskStart(void)
+{
+    xTaskCreate(Console_TaskTcpConsole, "tcp_console_task", 4096, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
 }

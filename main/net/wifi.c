@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "net/wifi.h"
+#include "core/core.h"
 
 static const char* TAG = "Wifi";
 
@@ -55,6 +56,7 @@ static void Wifi_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
             {
                 ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
                 ESP_LOGI(TAG, "got ip IPv4:" IPSTR, IP2STR(&event->ip_info.ip));
+                Core_EventNotify(CORE_EVENT_CONNECTED);
             }
             break;
         default:

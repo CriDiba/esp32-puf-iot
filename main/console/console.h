@@ -20,10 +20,12 @@ struct ConsoleCmd {
 
 void Console_CmdHelp(int socket, int argc, char *argv[]);
 void Console_CmdEnroll(int socket, int argc, char *argv[]);
+void Console_CmdPrintPuf(int socket, int argc, char *argv[]);
+void Console_CmdChallenge(int socket, int argc, char *argv[]);
 
 void Console_Printf(int socket, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 void Console_Println(int socket, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 void Console_RunCommand(int socket, char *command);
 
-void Console_TcpConsoleTask(void *pvParameters);
+void Console_TaskStart(void);

@@ -30,4 +30,6 @@ void set_blob(const uint8_t *blob, size_t length, const char* key);
  */
 bool get_blob(uint8_t **blob, size_t *length, const char *key);
 
+bool check_key(const char *key);
+
 #endif //ESP32_PUF_NVS_H
