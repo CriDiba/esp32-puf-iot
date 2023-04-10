@@ -7,3 +7,6 @@ cmake-build-debug
 
 sdkconfig
 sdkconfig.old
+
+# .DS_Store
+.DS_Store

@@ -81,7 +81,7 @@ void Console_CmdPrintPuf(int socket, int argc, char *argv[])
         Console_Println(socket, "PUF Bytes: %d", PUF_RESPONSE_LEN);
         for (size_t i = 0; i < PUF_RESPONSE_LEN; i++)
         {
-            Console_Printf(socket, "%02X ", PUF_RESPONSE[i]);
+            Console_Printf(socket, "0x%02X, ", PUF_RESPONSE[i]);
         }
         Console_Println(socket, "\n");
     }

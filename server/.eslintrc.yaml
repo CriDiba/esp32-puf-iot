@@ -1,0 +1,48 @@
+# to configure the linter:
+# - copy this file and .eslintignore at the root of the package you want to lint
+# - install dependencies: npm i -D eslint typescript @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-config-prettier eslint-plugin-prettier prettier
+# - add "lint": "eslint ." to the scripts in package.json
+# - run `npm run lint` to lint the project
+
+root: true
+parser: '@typescript-eslint/parser'
+plugins:
+  - '@typescript-eslint'
+  - 'prettier'
+  - 'eslint-plugin-import'
+extends:
+  - plugin:prettier/recommended
+  - eslint:recommended
+  - plugin:@typescript-eslint/eslint-recommended
+  - plugin:@typescript-eslint/recommended
+  - prettier
+ignorePatterns:
+  - '*.js'
+  - '*.d.ts'
+rules:
+  prettier/prettier: warn
+  semi: 'off'
+  no-empty-function: 'off'
+  curly: 'warn'
+  require-await: off
+  import/no-default-export: 'warn'
+  no-console: 'warn'
+  eqeqeq: ['warn', 'always', { 'null': 'ignore' }]
+  no-empty: off
+
+  # this rule conflicts with TypeScript namespaces.
+  # TypeScript already checks for not defined variables to this is redundant
+  no-undef: 'off'
+
+  # TypeScript options
+  '@typescript-eslint/ban-ts-comment': 'warn'
+  '@typescript-eslint/ban-types': 'warn'
+  '@typescript-eslint/explicit-function-return-type': 'off'
+  '@typescript-eslint/explicit-module-boundary-types': 'off'
+  '@typescript-eslint/member-delimiter-style': 'off'
+  '@typescript-eslint/no-empty-function': 'off'
+  '@typescript-eslint/no-empty-interface': 'off'
+  '@typescript-eslint/no-explicit-any': 'warn'
+  '@typescript-eslint/no-non-null-assertion': 'warn'
+  '@typescript-eslint/no-unused-vars': ['warn', { 'args': 'none' }]
+  '@typescript-eslint/no-use-before-define': 'off'

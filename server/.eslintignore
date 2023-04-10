@@ -1,0 +1,10 @@
+# ignore libraries
+node_modules/
+
+# ignore compiled files
+lib/
+
+# ignore config files
+*.yaml
+*.json
+*.lock
