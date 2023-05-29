@@ -1,6 +1,7 @@
 #include "console/console.h"
 
 #include "core/core.h"
+#include "crypto/crypto.h"
 #include "define.h"
 #include "puflib.h"
 
@@ -26,20 +27,24 @@
 static const char *TAG = "TcpConsole";
 
 static struct ConsoleCmd console_commands[] = {
-    { .name = "help",           .handler = Console_CmdHelp,         .help = "show this help message"            },
-    { .name = "enroll",         .handler = Console_CmdEnroll,       .help = "entroll the SRAM PUF"              },
-    { .name = "puf",            .handler = Console_CmdPrintPuf,     .help = "print SRAM PUF buffer"             },
-    { .name = "challenge",      .handler = Console_CmdChallenge,    .help = "trigger SRAM PUF with challenge"   }
+    {.name = "help", .handler = Console_CmdHelp, .help = "show this help message"},
+    {.name = "enroll", .handler = Console_CmdEnroll, .help = "entroll the SRAM PUF"},
+    {.name = "puf", .handler = Console_CmdPrintPuf, .help = "print SRAM PUF buffer"},
+    {.name = "challenge", .handler = Console_CmdChallenge, .help = "trigger SRAM PUF with challenge"},
+    {.name = "gen_ecc_key", .handler = Console_GenEccKey, .help = "generate ECC key and print CSR"},
 };
 
 static void Console_vprintf(int socket, const char *fmt, va_list args)
-{    
-    char buffer[256];
+{
+    char buffer[256] = {0};
     int length = vsnprintf(buffer, sizeof(buffer), fmt, args);
-    send(socket,buffer, length, 0);
+
+    printf("=>> %s ", buffer);
+
+    send(socket, buffer, length, 0);
 }
 
-void Console_Println(int socket, const char *fmt, ...) 
+void Console_Println(int socket, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -48,7 +53,7 @@ void Console_Println(int socket, const char *fmt, ...)
     va_end(args);
 }
 
-void Console_Printf(int socket, const char *fmt, ...) 
+void Console_Printf(int socket, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -56,15 +61,14 @@ void Console_Printf(int socket, const char *fmt, ...)
     va_end(args);
 }
 
-void Console_CmdHelp(int socket, int argc, char *argv[]) 
+void Console_CmdHelp(int socket, int argc, char *argv[])
 {
     (void)argc;
     (void)argv;
 
     Console_Println(socket, "Available commands:");
-    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++) 
+    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++)
         Console_Println(socket, "* %-15s - %s", console_commands[i].name, console_commands[i].help);
-
 }
 
 void Console_CmdEnroll(int socket, int argc, char *argv[])
@@ -105,21 +109,54 @@ void Console_CmdChallenge(int socket, int argc, char *argv[])
     Core_EventNotifyData(CORE_EVENT_PUF_CHALLENGE, chall, length + 1);
 }
 
+void Console_GenEccKey(int socket, int argc, char *argv[])
+{
+    bool puf_ok = get_puf_response();
+    if (PUF_STATE == RESPONSE_READY && puf_ok)
+    {
+        uint8_t PUF[32] = {0};
+        memcpy(PUF, PUF_RESPONSE, sizeof(PUF));
+
+        // char *CSR = (char *)malloc(1000 * sizeof(char));
+
+        uint16_t csr_buf_size = 500;
+        uint8_t *csr_buf = (uint8_t *)calloc(csr_buf_size, sizeof(uint8_t));
+        memset(csr_buf, 0, csr_buf_size);
+
+        Crypto_GetECDSAKey(PUF, csr_buf, csr_buf_size);
+
+        char buf[250 + 1] = {0};
+        memcpy(buf, csr_buf, 250);
+        Console_Printf(socket, "%s", buf);
+        memcpy(buf, (csr_buf + 250), 250);
+        Console_Printf(socket, "%s", buf);
+
+        free(csr_buf);
+    }
+    else
+    {
+        Console_Println(socket, "PUF is not available");
+    }
+
+    clean_puf_response();
+}
+
 void Console_RunCommand(const int socket, char *command)
 {
     int argc = 0;
     char *ptr = NULL;
     char *argv[MAX_ARGUMENTS];
     argv[argc++] = strtok_r(command, " \t", &ptr);
-    while (argc < MAX_ARGUMENTS && (argv[argc++] = strtok_r(NULL, " \t", &ptr)));
+    while (argc < MAX_ARGUMENTS && (argv[argc++] = strtok_r(NULL, " \t", &ptr)))
+        ;
     argc--;
 
     if (!argv[0])
         return;
 
-    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++) 
+    for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++)
     {
-        if (!strcmp(console_commands[i].name, argv[0])) 
+        if (!strcmp(console_commands[i].name, argv[0]))
         {
             ESP_LOGI(TAG, "received command: %s", command);
             console_commands[i].handler(socket, argc, argv);
@@ -127,7 +164,7 @@ void Console_RunCommand(const int socket, char *command)
             return;
         }
     }
-    
+
     Console_Println(socket, "-ERR: Unknown command %s", argv[0]);
 }
 
@@ -135,7 +172,7 @@ static void Console_GetCommand(const int socket)
 {
     int length;
     char cmd[128];
-    
+
     do
     {
         Console_Printf(socket, PROMPT);
@@ -146,7 +183,7 @@ static void Console_GetCommand(const int socket)
             Console_RunCommand(socket, cmd);
         }
     } while (length > 0);
-    
+
     ESP_LOGI(TAG, "client disconnected");
 }
 
@@ -163,7 +200,8 @@ void Console_TaskTcpConsole(void *pvParameters)
     int keepCount = CONSOLE_KEEPALIVE_COUNT;
 
     int server_socket = socket(addr_family, SOCK_STREAM, ip_protocol);
-    if (server_socket < 0) {
+    if (server_socket < 0)
+    {
         ESP_LOGE(TAG, "unable to create socket: errno %d", errno);
         vTaskDelete(NULL);
         return;
@@ -179,15 +217,17 @@ void Console_TaskTcpConsole(void *pvParameters)
 
     ESP_LOGI(TAG, "bind socket...");
     int bind_err = bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
-    if (bind_err != 0) {
+    if (bind_err != 0)
+    {
         ESP_LOGE(TAG, "socket unable to bind: errno %d", errno);
         goto failure;
     }
 
-    ESP_LOGI(TAG, "socket bound, port %d", CONSOLE_PORT);   
+    ESP_LOGI(TAG, "socket bound, port %d", CONSOLE_PORT);
 
     int listen_err = listen(server_socket, 1);
-    if (listen_err != 0) {
+    if (listen_err != 0)
+    {
         ESP_LOGE(TAG, "error occurred during listen: errno %d", errno);
         goto failure;
     }
@@ -199,19 +239,21 @@ void Console_TaskTcpConsole(void *pvParameters)
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
         int client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_socket < 0) {
+        if (client_socket < 0)
+        {
             ESP_LOGE(TAG, "unable to accept connection: errno %d", errno);
             break;
         }
 
-        /* set tcp keepalive option */ 
+        /* set tcp keepalive option */
         setsockopt(client_socket, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(int));
         setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(int));
         setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(int));
         setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(int));
 
         /* convert ip address to string */
-        if (client_addr.sin_family == PF_INET) {
+        if (client_addr.sin_family == PF_INET)
+        {
             inet_ntoa_r(((struct sockaddr_in *)&client_addr)->sin_addr, client_addr_str, sizeof(client_addr_str) - 1);
         }
 
@@ -230,5 +272,5 @@ failure:
 
 void Console_TaskStart(void)
 {
-    xTaskCreate(Console_TaskTcpConsole, "tcp_console_task", 4096, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
+    xTaskCreate(Console_TaskTcpConsole, "tcp_console_task", 8192, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
 }

@@ -2,3 +2,6 @@
 	path = esp-idf
 	url = https://github.com/espressif/esp-idf
 	branch = release/v4.4
+[submodule "main/lib/coreMQTT"]
+	path = main/lib/coreMQTT
+	url = https://github.com/FreeRTOS/coreMQTT.git

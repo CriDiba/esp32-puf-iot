@@ -3,6 +3,7 @@
 #include "net/http_client.h"
 #include "console/console.h"
 #include "net/http_client.h"
+#include "net/mqtt.h"
 #include "define.h"
 #include "puflib.h"
 
@@ -27,15 +28,17 @@ esp_event_loop_handle_t loop_core_task;
 
 ESP_EVENT_DEFINE_BASE(CORE_EVENT);
 
-static struct {
+static struct
+{
     CoreState state;
+    uint32_t lastStatePutTimestamp;
 } coreState;
 
 void Core_SetCoreState(CoreState newState);
 static void Core_EnrollPuf(void);
 static void Core_OnChallenge(char *challenge);
 
-static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     switch ((CoreEvent)event_id)
     {
@@ -43,17 +46,23 @@ static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
         Core_EnrollPuf();
         break;
     case CORE_EVENT_CONNECTED:
+    {
         /* start tcp console */
         Console_TaskStart();
         Core_SetCoreState(CORE_STATE_ONLINE);
-        break;
+
+        /* connect to mqtt broker */
+        bool sessionPresent = false;
+        Mqtt_Connect(mkCSTRING("esp32-ecc-test-cri"), &sessionPresent);
+    }
+    break;
     case CORE_EVENT_PUF_CHALLENGE:
-        {
-            char* chall = (char*) event_data;
-            ESP_LOGI(TAG, "received new challenge %s", chall);
-            Core_OnChallenge(chall);
-        }
-        break;
+    {
+        char *chall = (char *)event_data;
+        ESP_LOGI(TAG, "received new challenge %s", chall);
+        Core_OnChallenge(chall);
+    }
+    break;
     default:
         ESP_LOGI(TAG, "unhandled core event: %d", event_id);
         break;
@@ -87,17 +96,32 @@ static void Core_EnrollPuf(void)
     enroll_puf();
 }
 
+static void Core_MqttCallback(CString topic, CBuffer payload)
+{
+    ESP_LOGI(TAG, "RECEIVED MESSAGE FROM CLOUD ON TOPIC %s", topic.string);
+}
+
 static void Core_TaskSetup(void)
 {
     if (!is_puf_configured())
     {
         Core_EnrollPuf();
     }
-    
+
     Core_SetCoreState(CORE_STATE_ENROLLED);
 
     /* start wifi connection */
     Wifi_Init();
+
+    /* setup mqtt */
+    Mqtt_Init(Core_MqttCallback);
+}
+
+static uint32_t Time_GetTimeMs()
+{
+    struct timeval tv = {0};
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
 }
 
 static void Core_TaskMain(void *pvParameters)
@@ -114,10 +138,28 @@ static void Core_TaskMain(void *pvParameters)
 
     /* register the handler for the core events */
     ESP_ERROR_CHECK(esp_event_handler_instance_register_with(loop_core_task, CORE_EVENT, ESP_EVENT_ANY_ID, Core_EventHandler, loop_core_task, NULL));
-    
+
+    uint32_t timestamp = 0;
+
     while (true)
     {
         ESP_LOGD(TAG, "running core task");
+
+        timestamp = Time_GetTimeMs();
+
+        if (coreState.state == CORE_STATE_ONLINE)
+        {
+            if (timestamp - coreState.lastStatePutTimestamp > 60000)
+            {
+                ESP_LOGI(TAG, "send periodic state update to cloud");
+                CString topic = mkCSTRING("/device/temperature");
+                char *data = "{\"temp\": \"12.8\"}";
+                CBuffer buffer = {.buffer = (uint8_t *)data, .length = strlen(data)};
+                Mqtt_Publish(topic, buffer);
+                coreState.lastStatePutTimestamp = timestamp;
+            }
+        }
+
         esp_event_loop_run(loop_core_task, 100);
         vTaskDelay(pdMS_TO_TICKS(CORE_TASK_PERIOD_MS));
     }
@@ -129,7 +171,7 @@ static void Core_TaskMain(void *pvParameters)
     esp_event_loop_delete(loop_core_task);
 
     ESP_LOGI(TAG, "deleting task core");
-    
+
     vTaskDelete(NULL);
 }
 
@@ -142,12 +184,12 @@ void Core_SetCoreState(CoreState newState)
     }
 }
 
-void Core_EventNotifyData(CoreEvent event_id, void* event_data, size_t event_data_size)
+void Core_EventNotifyData(CoreEvent event_id, void *event_data, size_t event_data_size)
 {
     ESP_ERROR_CHECK(esp_event_post_to(loop_core_task, CORE_EVENT, event_id, event_data, event_data_size, portMAX_DELAY));
 }
 
-void Core_EventNotify(CoreEvent event_id) 
+void Core_EventNotify(CoreEvent event_id)
 {
     Core_EventNotifyData(event_id, NULL, 0);
 }
