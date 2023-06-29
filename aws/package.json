@@ -1,0 +1,13 @@
+{
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "zip": "zip -r fn.zip ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-iot": "^3.345.0",
+    "@aws-sdk/client-iot-data-plane": "^3.345.0",
+    "@aws-sdk/client-s3": "^3.345.0",
+    "jsrsasign": "^10.8.6"
+  }
+}
