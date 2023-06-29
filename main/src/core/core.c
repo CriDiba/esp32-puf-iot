@@ -6,6 +6,9 @@
 #include "net/mqtt.h"
 #include "define.h"
 #include "puflib.h"
+#include "core/nvs.h"
+#include "core/error.h"
+#include "crypto/crypto.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -21,6 +24,8 @@
 #define CORE_TASK_QUEUE_SIZE 10
 #define CORE_TASK_PERIOD_MS 500
 
+#define STATE_UPDATE_INTERVAL 2000
+
 static const char *TAG = "Core";
 
 /* core task event loop */
@@ -32,11 +37,21 @@ static struct
 {
     CoreState state;
     uint32_t lastStatePutTimestamp;
-} coreState;
+    bool isCertificateRotationEnabled;
+} coreState = {0};
 
 void Core_SetCoreState(CoreState newState);
+static void Core_TaskMain(void *pvParameters);
 static void Core_EnrollPuf(void);
+static void Core_CloudConnect();
+static void Core_CloudProcessLoop(uint32_t timestamp);
+static void Core_CloudCallback(CString topic, CBuffer payload);
 static void Core_OnChallenge(char *challenge);
+static void Core_OnCreateCSR();
+static void Core_OnReceiveCRT(CBuffer certPayload);
+static void Core_OnRotateCRT();
+
+static uint32_t Time_GetTimeMs();
 
 static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -46,16 +61,11 @@ static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
         Core_EnrollPuf();
         break;
     case CORE_EVENT_CONNECTED:
-    {
+        Core_SetCoreState(CORE_STATE_ONLINE);
         /* start tcp console */
         Console_TaskStart();
-        Core_SetCoreState(CORE_STATE_ONLINE);
+        break;
 
-        /* connect to mqtt broker */
-        bool sessionPresent = false;
-        Mqtt_Connect(mkCSTRING("esp32-ecc-test-cri"), &sessionPresent);
-    }
-    break;
     case CORE_EVENT_PUF_CHALLENGE:
     {
         char *chall = (char *)event_data;
@@ -63,9 +73,73 @@ static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
         Core_OnChallenge(chall);
     }
     break;
+
+    case CORE_EVENT_CERT_ROTATION:
+
+        break;
     default:
         ESP_LOGI(TAG, "unhandled core event: %d", event_id);
         break;
+    }
+}
+
+static void Core_CloudConnect()
+{
+    /* connect to mqtt broker */
+    bool sessionPresent = false;
+    ErrorCode err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, true);
+
+    if (err)
+        return;
+
+    Core_SetCoreState(CORE_STATE_CLOUD_CONNECTED);
+
+    if (!sessionPresent)
+    {
+        Mqtt_Subscribe(mkCSTRING(MGT_TOPIC_FILTER));
+    }
+}
+
+static void Core_CloudProcessLoop(uint32_t timestamp)
+{
+    ESP_LOGI(TAG, "QUI");
+    // send periodic state update
+    if (timestamp - coreState.lastStatePutTimestamp > STATE_UPDATE_INTERVAL)
+    {
+        ESP_LOGI(TAG, "send periodic state update to cloud");
+
+        char topicBuf[50] = {0};
+        CString topic = {
+            .string = topicBuf,
+            .length = snprintf(topicBuf, 50, "%s/temperature", DEVICE_ID)};
+
+        char *data = "{\"temp\": \"12.8\"}";
+        CBuffer buffer = {.buffer = (uint8_t *)data, .length = strlen(data)};
+        Mqtt_Publish(topic, buffer);
+        coreState.lastStatePutTimestamp = timestamp;
+    }
+
+    // process mqtt loop
+    Mqtt_ProcessLoop();
+}
+
+static void Core_CloudCallback(CString topic, CBuffer payload)
+{
+    /* this callback is invoked at each publish message received from MQTT */
+    ESP_LOGI(TAG, "received message from cloud");
+    printf("TOPIC=%.*s\r\n", topic.length, topic.string);
+    printf("DATA=%.*s\r\n", payload.length, payload.buffer);
+
+    if (strncmp(topic.string, CSR_REQ_TOPIC, topic.length) == 0)
+    {
+        /* received CSR request*/
+        Core_OnCreateCSR();
+    }
+
+    if (strncmp(topic.string, CRT_REQ_TOPIC, topic.length) == 0)
+    {
+        /* received signed certificate */
+        Core_OnReceiveCRT(payload);
     }
 }
 
@@ -90,15 +164,115 @@ static void Core_OnChallenge(char *challenge)
     Http_SendResponse(resHex);
 }
 
+static void Core_OnCreateCSR()
+{
+    /* create temporary cert */
+    Buffer csr;
+    ErrorCode err = Crypto_RefreshCertificate(&csr);
+
+    if (!err)
+    {
+        size_t dataBufMaxSize = 20 + csr.length;
+        uint8_t *dataBuf = (uint8_t *)calloc(dataBufMaxSize, sizeof(uint8_t));
+        size_t dataLen = snprintf((char *)dataBuf, dataBufMaxSize, "{\"csr\": \"%.*s\"}", csr.length, csr.buffer);
+        CBuffer data = {.buffer = dataBuf, .length = dataLen};
+        CString topic = mkCSTRING(CSR_RES_TOPIC);
+        Mqtt_Publish(topic, data);
+        free(dataBuf);
+
+        coreState.isCertificateRotationEnabled = true;
+    }
+
+    free(csr.buffer);
+}
+
+static void Core_OnReceiveCRT(CBuffer certPayload)
+{
+    /* parse cert message */
+    char *certRawStr = (char *)calloc(certPayload.length, sizeof(char));
+    memcpy(certRawStr, certPayload.buffer, certPayload.length);
+    char *certStr = strtok(certRawStr, "\"certificatePem\":\"");
+    certStr = strtok(NULL, "\"");
+
+    /* save temporary cert */
+    Buffer cert = {.buffer = (uint8_t *)certStr, .length = strlen(certStr)};
+    Nvs_SetBuffer(NVS_DEVICE_CERT_KEY_TMP, cert);
+
+    /* disconnect from cloud */
+    ErrorCode err = Mqtt_Disconnect(true);
+    if (err)
+        return;
+
+    /* connect using new certificate */
+    bool sessionPresent = false;
+    err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, true);
+
+    const char *dataBuf = "{}";
+    CBuffer data = {.buffer = (uint8_t *)dataBuf, .length = strlen(dataBuf)};
+
+    if (err)
+    {
+        /* failure, send ERR message */
+        ESP_LOGI(TAG, "rotation: failure on connection with new cert");
+        CString topic = mkCSTRING(CRT_ERR_TOPIC);
+        Mqtt_Publish(topic, data);
+        return;
+    }
+
+    /* success, rotate certificates */
+    Core_OnRotateCRT();
+    coreState.isCertificateRotationEnabled = false;
+
+    /* send ACK message */
+    ESP_LOGI(TAG, "rotation: successfully connected with new cert");
+    CString topic = mkCSTRING(CRT_ACK_TOPIC);
+    Mqtt_Publish(topic, data);
+}
+
+static void Core_OnRotateCRT()
+{
+    Buffer csr, crt, salt;
+    bool findCsr = Nvs_GetBuffer(NVS_DEVICE_CSR_KEY_TMP, &csr);
+    bool findCrt = Nvs_GetBuffer(NVS_DEVICE_CERT_KEY_TMP, &crt);
+    bool findSalt = Nvs_GetBuffer(NVS_DEVICE_SALT_KEY_TMP, &salt);
+
+    if (findCsr && findCrt && findSalt)
+    {
+        Nvs_SetBuffer(NVS_DEVICE_CSR_KEY, csr);
+        Nvs_SetBuffer(NVS_DEVICE_CERT_KEY, crt);
+        Nvs_SetBuffer(NVS_DEVICE_SALT_KEY, salt);
+    }
+
+    free(csr.buffer);
+    free(crt.buffer);
+    free(salt.buffer);
+}
+
+const char *Core_GetCrtNvsKey()
+{
+    if (coreState.isCertificateRotationEnabled)
+        return NVS_DEVICE_CERT_KEY_TMP;
+    return NVS_DEVICE_CERT_KEY;
+}
+
+const char *Core_GetCsrNvsKey()
+{
+    if (coreState.isCertificateRotationEnabled)
+        return NVS_DEVICE_CSR_KEY_TMP;
+    return NVS_DEVICE_CSR_KEY;
+}
+
+const char *Core_GetSaltNvsKey()
+{
+    if (coreState.isCertificateRotationEnabled)
+        return NVS_DEVICE_SALT_KEY_TMP;
+    return NVS_DEVICE_SALT_KEY;
+}
+
 static void Core_EnrollPuf(void)
 {
     Core_SetCoreState(CORE_STATE_NOT_ENROLLED);
     enroll_puf();
-}
-
-static void Core_MqttCallback(CString topic, CBuffer payload)
-{
-    ESP_LOGI(TAG, "RECEIVED MESSAGE FROM CLOUD ON TOPIC %s", topic.string);
 }
 
 static void Core_TaskSetup(void)
@@ -114,7 +288,7 @@ static void Core_TaskSetup(void)
     Wifi_Init();
 
     /* setup mqtt */
-    Mqtt_Init(Core_MqttCallback);
+    Mqtt_Init(Core_CloudCallback);
 }
 
 static uint32_t Time_GetTimeMs()
@@ -143,21 +317,21 @@ static void Core_TaskMain(void *pvParameters)
 
     while (true)
     {
-        ESP_LOGD(TAG, "running core task");
+        ESP_LOGI(TAG, "running core task");
+        ESP_LOGI(TAG, "STATE: %d\n", coreState.state);
 
         timestamp = Time_GetTimeMs();
 
-        if (coreState.state == CORE_STATE_ONLINE)
+        switch (coreState.state)
         {
-            if (timestamp - coreState.lastStatePutTimestamp > 60000)
-            {
-                ESP_LOGI(TAG, "send periodic state update to cloud");
-                CString topic = mkCSTRING("/device/temperature");
-                char *data = "{\"temp\": \"12.8\"}";
-                CBuffer buffer = {.buffer = (uint8_t *)data, .length = strlen(data)};
-                Mqtt_Publish(topic, buffer);
-                coreState.lastStatePutTimestamp = timestamp;
-            }
+        case CORE_STATE_ONLINE:
+            /* connect to cloud */
+            Core_CloudConnect();
+            break;
+        case CORE_STATE_CLOUD_CONNECTED:
+            Core_CloudProcessLoop(timestamp);
+        default:
+            break;
         }
 
         esp_event_loop_run(loop_core_task, 100);

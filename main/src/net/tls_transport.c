@@ -11,20 +11,16 @@
 #include "define.h"
 #include "crypto/crypto.h"
 #include "net/tls_transport.h"
+#include "core/nvs.h"
+#include "core/core.h"
+
+#include <stdbool.h>
+#include <string.h>
 
 static const char *TAG = "TLS";
 
-extern const uint8_t client_cert_pem_start[] asm("_binary_client_crt_start");
-extern const uint8_t client_cert_pem_end[] asm("_binary_client_crt_end");
-extern const uint8_t server_cert_pem_start[] asm("_binary_amazon_crt_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_amazon_crt_end");
-
-// extern const uint8_t client_cert_pem_start[] asm("_binary_device_crt_start");
-// extern const uint8_t client_cert_pem_end[] asm("_binary_device_crt_end");
-// extern const uint8_t client_cert_key_start[] asm("_binary_device_key_start");
-// extern const uint8_t client_cert_key_end[] asm("_binary_device_key_end");
-// extern const uint8_t server_cert_pem_start[] asm("_binary_amazon_crt_start");
-// extern const uint8_t server_cert_pem_end[] asm("_binary_amazon_crt_end");
+extern const uint8_t server_cert_pem_start[] asm("_binary_amazon_rootca_crt_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_amazon_rootca_crt_end");
 
 struct NetworkContext
 {
@@ -56,20 +52,12 @@ static void PrintError(int errorCode, const char *reason)
 
 int32_t TLSTransport_Recv(struct NetworkContext *ctx, void *pBuffer, size_t bytesToRecv)
 {
-    // if (bytesToRecv == 1)
-    // {
-    //     /* 1 byte means check if the transport is ready to receive */
-    //     int pending = mbedtls_ssl_check_pending(&ctx->ssl);
-    //     // if (!pending)
-    //     //     /* check if there is something to read in the TCP buffer */
-    //     //     pending = mbedtls_net_poll(&ctx->net, MBEDTLS_NET_POLL_READ, ctx->recvTimeoutMs) & MBEDTLS_NET_POLL_READ;
-
-    //     if (!pending)
-    //         /* nothing to read */
-    //         return 0;
-    // }
+    ESP_LOGI(TAG, "MBEDTLS READ BYTES TO RECV %d\n", bytesToRecv);
 
     int result = mbedtls_ssl_read(&ctx->ssl, pBuffer, bytesToRecv);
+
+    ESP_LOGI(TAG, "MBEDTLS RESULT %d\n", result);
+
     if (result < 0)
         PrintError(result, "read error");
 
@@ -113,7 +101,7 @@ void TLSTransport_Free(struct NetworkContext *ctx)
     free(ctx);
 }
 
-void TLSTransport_Connect(struct NetworkContext *ctx)
+ErrorCode TLSTransport_Connect(struct NetworkContext *ctx)
 {
     if (ctx->isConnected)
     {
@@ -148,15 +136,16 @@ void TLSTransport_Connect(struct NetworkContext *ctx)
 
     mbedtls_ssl_conf_rng(&ctx->config, mbedtls_ctr_drbg_random, &ctx->ctrDrbg);
 
-    // bool hasClientCert = ctx->clientCertPath != NULL && ctx->clientKeyPath != NULL;
-    bool hasClientCert = true;
+    Buffer deviceCert;
+    bool hasClientCert = Nvs_GetBuffer(Core_GetCrtNvsKey(), &deviceCert);
+
     if (hasClientCert)
     {
         ESP_LOGI(TAG, "cloud: loading client certificate...");
         mbedtls_x509_crt_init(&ctx->clientCertificate);
 
-        // error = mbedtls_x509_crt_parse_file(&ctx->clientCertificate, ctx->clientCertPath);
-        error = mbedtls_x509_crt_parse(&ctx->clientCertificate, (unsigned char *)client_cert_pem_start, 1 + strlen((const char *)client_cert_pem_start));
+        error = mbedtls_x509_crt_parse(&ctx->clientCertificate, deviceCert.buffer, 1 + strlen((char *)deviceCert.buffer));
+        free(deviceCert.buffer);
 
         if (error)
         {
@@ -166,8 +155,6 @@ void TLSTransport_Connect(struct NetworkContext *ctx)
 
         ESP_LOGI(TAG, "cloud: loading client private key...");
         mbedtls_pk_init(&ctx->privateKey);
-        // mbedtls_pk_parse_key(&ctx->privateKey, (unsigned char *)client_cert_key_start, 1 + strlen((const char *)client_cert_key_start), NULL, 0);
-        // mbedtls_pk_parse_keyfile(&ctx->privateKey, ctx->clientKeyPath, NULL);
         Crypto_GetECCKey(&ctx->privateKey);
 
         if (error)
@@ -247,7 +234,7 @@ void TLSTransport_Connect(struct NetworkContext *ctx)
 
     ctx->isConnected = true;
 
-    return; // SUCCESS
+    return SUCCESS;
 
 err:
     mbedtls_ssl_free(&ctx->ssl);
@@ -259,10 +246,10 @@ err:
     mbedtls_ctr_drbg_free(&ctx->ctrDrbg);
     mbedtls_entropy_free(&ctx->entropy);
 
-    return; // FAILURE
+    return FAILURE;
 }
 
-void TLSTransport_Disconnect(struct NetworkContext *ctx, bool force)
+ErrorCode TLSTransport_Disconnect(struct NetworkContext *ctx, bool force)
 {
     if (!force)
     {
@@ -281,4 +268,6 @@ void TLSTransport_Disconnect(struct NetworkContext *ctx, bool force)
     mbedtls_entropy_free(&ctx->entropy);
 
     ctx->isConnected = false;
+
+    return SUCCESS;
 }

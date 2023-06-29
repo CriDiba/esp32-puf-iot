@@ -1,7 +1,10 @@
 #pragma once
 
-#include "mbedtls/pk.h" // mbedtls_pk_context
+#include "mbedtls/pk.h"
+#include "core/error.h"
+#include "define.h"
 
-void Crypto_GetECDSAKey(uint8_t *puf, uint8_t *csr_buf, uint16_t csr_buf_size);
-
-void Crypto_GetECCKey(mbedtls_pk_context *ecc_key);
+ErrorCode Crypto_GetECCKey(mbedtls_pk_context *eccKey);
+ErrorCode Crypto_RefreshCertificate(Buffer *outCsr);
+ErrorCode Crypto_GetRandomSalt(Buffer *outSalt);
+ErrorCode Crypto_GetPuf(Buffer *outPuf);

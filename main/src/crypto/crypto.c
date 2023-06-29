@@ -1,3 +1,4 @@
+#include <string.h>
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/hmac_drbg.h"
@@ -5,14 +6,14 @@
 #include "mbedtls/sha256.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/pk.h"
+#include "mbedtls/x509_csr.h"
+#include "esp_log.h"
 
 #include "puflib.h"
-
-#include "mbedtls/x509_csr.h" // mbedtls_x509write_csr
-
-#include <string.h>
-
-#include "esp_log.h"
+#include "define.h"
+#include "core/nvs.h"
+#include "core/core.h"
+#include "crypto/crypto.h"
 
 static const char *TAG = "Crypto";
 
@@ -23,84 +24,188 @@ static const char *TAG = "Crypto";
 #define ECPARAMS mbedtls_ecp_curve_list()->grp_id
 #endif
 
-void Crypto_GenECCKey(mbedtls_pk_context *ecc_key, uint8_t *puf)
+/* puf */
+#define PUF_LENGTH 32
+#define SALT_LENGTH 32
+
+/* csr max length */
+#define CSR_BUF_MAX_LEN 500
+
+ErrorCode Crypto_SeedCtrDrbg(mbedtls_ctr_drbg_context *ctrDrbg, mbedtls_entropy_context *entropy)
 {
-    mbedtls_hmac_drbg_context hmac_drbg;
-    mbedtls_hmac_drbg_init(&hmac_drbg);
-
-    // const unsigned char seed[] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
-    // size_t seed_length = sizeof(seed);
-    size_t seed_length = 32;
-
-    mbedtls_hmac_drbg_seed_buf(&hmac_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), puf, seed_length);
-
-    mbedtls_pk_init(ecc_key);
-    mbedtls_pk_setup(ecc_key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
-
-    mbedtls_ecp_gen_key(ECPARAMS, mbedtls_pk_ec(*ecc_key), mbedtls_hmac_drbg_random, &hmac_drbg);
-
-    unsigned char buf[500] = {0};
-    mbedtls_pk_write_key_pem(ecc_key, buf, sizeof(buf));
-    // printf("\n%s\n", buf);
+    mbedtls_ctr_drbg_init(ctrDrbg);
+    mbedtls_entropy_init(entropy);
+    return mbedtls_ctr_drbg_seed(ctrDrbg, mbedtls_entropy_func, entropy, NULL, 0);
 }
 
-void Crypto_GenCSR(mbedtls_pk_context *ecc_key, uint8_t *csr_buf, uint16_t csr_buf_size)
+ErrorCode Crypto_GetRandomSalt(Buffer *outSalt)
 {
-    mbedtls_x509write_csr signing_req;
-    mbedtls_x509write_csr_init(&signing_req);
+    ErrorCode err = SUCCESS;
 
-    mbedtls_x509write_csr_set_md_alg(&signing_req, MBEDTLS_MD_SHA256);
-
-    /* add certificate subject name */
-    char *subject_name = "CN=Cert,O=mbed TLS,C=UK\n";
-    mbedtls_x509write_csr_set_subject_name(&signing_req, subject_name);
-
-    /* set certificate private key */
-    mbedtls_x509write_csr_set_key(&signing_req, ecc_key);
-
-    /* rng */
-    mbedtls_hmac_drbg_context hmac_drbg;
-    mbedtls_hmac_drbg_init(&hmac_drbg);
+    mbedtls_ctr_drbg_context ctrDrbg;
     mbedtls_entropy_context entropy;
-    mbedtls_entropy_init(&entropy);
-    mbedtls_hmac_drbg_seed(&hmac_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), mbedtls_entropy_func, &entropy, NULL, 0);
+    err = Crypto_SeedCtrDrbg(&ctrDrbg, &entropy);
+    ERROR_CHECK(err);
 
-    /* get crs pem */
-    mbedtls_x509write_csr_pem(&signing_req, csr_buf, csr_buf_size, mbedtls_hmac_drbg_random, &hmac_drbg);
-    printf("\n%s\n", csr_buf);
+    err = mbedtls_ctr_drbg_random(&ctrDrbg, outSalt->buffer, outSalt->length);
+    ESP_LOGI(TAG, "generate random salt: %.*s", outSalt->length, outSalt->buffer);
+
+    mbedtls_ctr_drbg_free(&ctrDrbg);
+    mbedtls_entropy_free(&entropy);
+
+    return err;
 }
 
-void Crypto_GetECDSAKey(uint8_t *puf, uint8_t *csr_buf, uint16_t csr_buf_size)
-{
-    mbedtls_pk_context ecc_key;
-
-    ESP_LOGI(TAG, "Generate ECC KEY");
-    Crypto_GenECCKey(&ecc_key, puf);
-
-    ESP_LOGI(TAG, "Generate CSR");
-    Crypto_GenCSR(&ecc_key, csr_buf, csr_buf_size);
-}
-
-void Crypto_GetECCKey(mbedtls_pk_context *ecc_key)
+ErrorCode Crypto_GetPuf(Buffer *outPuf)
 {
     bool puf_ok = false;
 
     do
     {
+        printf("Provo a recuperare la PUF");
         clean_puf_response();
         puf_ok = get_puf_response();
     } while (!puf_ok);
 
     if (PUF_STATE == RESPONSE_READY)
     {
-        uint8_t PUF[32] = {0};
-        memcpy(PUF, PUF_RESPONSE, sizeof(PUF));
-        Crypto_GenECCKey(ecc_key, PUF);
-    }
-    else
-    {
-        ESP_LOGI(TAG, "PUF is not available");
+        memcpy(outPuf->buffer, PUF_RESPONSE, PUF_LENGTH);
     }
 
     clean_puf_response();
+    return SUCCESS;
+}
+
+ErrorCode Crypto_GenerateECCKey(mbedtls_pk_context *outputKey, Buffer puf, Buffer salt)
+{
+    assert(puf.length >= salt.length);
+
+    ErrorCode err = SUCCESS;
+
+    mbedtls_hmac_drbg_context hmac_drbg;
+    mbedtls_hmac_drbg_init(&hmac_drbg);
+
+    size_t seedLength = puf.length;
+    uint8_t *seed = (uint8_t *)calloc(seedLength, sizeof(uint8_t));
+    memset(seed, 0, seedLength);
+
+    /* xor between puf and seed */
+    for (size_t i = 0; i < puf.length; i++)
+    {
+        seed[i] = puf.buffer[i] ^ salt.buffer[i];
+    }
+
+    /* seed hmac drbg */
+    err = mbedtls_hmac_drbg_seed_buf(&hmac_drbg, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), seed, seedLength);
+    ERROR_CHECK(err);
+
+    /* generate ecc key */
+    mbedtls_pk_init(outputKey);
+    mbedtls_pk_setup(outputKey, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+    err = mbedtls_ecp_gen_key(ECPARAMS, mbedtls_pk_ec(*outputKey), mbedtls_hmac_drbg_random, &hmac_drbg);
+    ERROR_CHECK(err);
+
+    /* print key pem */
+    unsigned char buf[500] = {0};
+    err = mbedtls_pk_write_key_pem(outputKey, buf, sizeof(buf));
+
+    return err;
+}
+
+ErrorCode Crypto_GenerateCSR(mbedtls_pk_context *eccKey, CString certSubject, Buffer *outCsr)
+{
+    ErrorCode err = SUCCESS;
+
+    mbedtls_x509write_csr signing_req;
+    mbedtls_x509write_csr_init(&signing_req);
+
+    /* set digest algo */
+    mbedtls_x509write_csr_set_md_alg(&signing_req, MBEDTLS_MD_SHA256);
+
+    /* add certificate subject name */
+    err = mbedtls_x509write_csr_set_subject_name(&signing_req, certSubject.string);
+    ERROR_CHECK(err);
+
+    /* set certificate private key */
+    mbedtls_x509write_csr_set_key(&signing_req, eccKey);
+
+    /* rng */
+    mbedtls_ctr_drbg_context ctrDrbg;
+    mbedtls_entropy_context entropy;
+    err = Crypto_SeedCtrDrbg(&ctrDrbg, &entropy);
+    ERROR_CHECK(err);
+
+    /* get crs pem */
+    err = mbedtls_x509write_csr_pem(&signing_req, outCsr->buffer, outCsr->length, mbedtls_ctr_drbg_random, &ctrDrbg);
+    return err;
+}
+
+ErrorCode Crypto_RefreshCertificate(Buffer *outCsr)
+{
+    ErrorCode err = SUCCESS;
+    mbedtls_pk_context eccPkCtx;
+
+    /* retrive puf */
+    uint8_t pufBuf[PUF_LENGTH] = {0};
+    Buffer puf = {.buffer = pufBuf, .length = sizeof(pufBuf)};
+    err = Crypto_GetPuf(&puf);
+    ERROR_CHECK(err);
+
+    /* generate client certificate */
+    ESP_LOGI(TAG, "generate client certificate");
+    char certificateSubject[100] = {0};
+    const char *commonName = DEVICE_ID;
+    const char *organization = CERT_ORGANIZATION;
+    size_t len = snprintf(certificateSubject, sizeof(certificateSubject), "C=IT,CN=%s,O=%s", commonName, organization);
+    CString subject = {.string = certificateSubject, .length = len};
+
+    /* generate random salt */
+    ESP_LOGI(TAG, "generate random salt");
+    uint8_t saltBuf[SALT_LENGTH] = {0};
+    Buffer salt = {.buffer = saltBuf, .length = sizeof(saltBuf)};
+    err = Crypto_GetRandomSalt(&salt);
+    ERROR_CHECK(err);
+    Nvs_SetBuffer(NVS_DEVICE_SALT_KEY_TMP, salt);
+
+    /* generate keypair */
+    ESP_LOGI(TAG, "generate ECC keypair");
+    err = Crypto_GenerateECCKey(&eccPkCtx, puf, salt);
+    ERROR_CHECK(err);
+
+    /* generate certificate signing request*/
+    uint8_t *csrBuf = (uint8_t *)calloc(CSR_BUF_MAX_LEN, sizeof(uint8_t));
+    memset(csrBuf, 0, CSR_BUF_MAX_LEN);
+    outCsr->buffer = csrBuf;
+    outCsr->length = CSR_BUF_MAX_LEN;
+
+    /* generate csr */
+    ESP_LOGI(TAG, "generate CSR from keypair");
+    err = Crypto_GenerateCSR(&eccPkCtx, subject, outCsr);
+    ERROR_CHECK(err);
+    Nvs_SetBuffer(NVS_DEVICE_CSR_KEY_TMP, *outCsr);
+
+    return err;
+}
+
+ErrorCode Crypto_GetECCKey(mbedtls_pk_context *eccKey)
+{
+    ErrorCode err = SUCCESS;
+
+    Buffer salt;
+    bool findSalt = Nvs_GetBuffer(Core_GetSaltNvsKey(), &salt);
+    if (!findSalt)
+    {
+        ESP_LOGE(TAG, "salt not stored");
+        return FAILURE;
+    }
+
+    /* retrive puf */
+    uint8_t pufBuf[PUF_LENGTH] = {0};
+    Buffer puf = {.buffer = pufBuf, .length = sizeof(pufBuf)};
+    err = Crypto_GetPuf(&puf);
+    ERROR_CHECK(err);
+
+    err = Crypto_GenerateECCKey(eccKey, puf, salt);
+
+    return err;
 }

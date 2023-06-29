@@ -22,16 +22,20 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "core/nvs.h"
+
 #define MAX_ARGUMENTS 32
 
 static const char *TAG = "TcpConsole";
 
 static struct ConsoleCmd console_commands[] = {
     {.name = "help", .handler = Console_CmdHelp, .help = "show this help message"},
+    {.name = "read", .handler = Console_CmdRead, .help = "read value from nvs"},
     {.name = "enroll", .handler = Console_CmdEnroll, .help = "entroll the SRAM PUF"},
-    {.name = "puf", .handler = Console_CmdPrintPuf, .help = "print SRAM PUF buffer"},
+    {.name = "puf", .handler = Console_CmdPuf, .help = "print SRAM PUF buffer"},
     {.name = "challenge", .handler = Console_CmdChallenge, .help = "trigger SRAM PUF with challenge"},
-    {.name = "gen_ecc_key", .handler = Console_GenEccKey, .help = "generate ECC key and print CSR"},
+    {.name = "refresh_cert", .handler = Console_CmdRefreshCrt, .help = "generate ECC key and print CSR"},
+    {.name = "store_cert", .handler = Console_CmdStoreCrt, .help = "store device certificate"},
 };
 
 static void Console_vprintf(int socket, const char *fmt, va_list args)
@@ -61,7 +65,7 @@ void Console_Printf(int socket, const char *fmt, ...)
     va_end(args);
 }
 
-void Console_CmdHelp(int socket, int argc, char *argv[])
+ErrorCode Console_CmdHelp(int socket, int argc, char *argv[])
 {
     (void)argc;
     (void)argv;
@@ -69,24 +73,57 @@ void Console_CmdHelp(int socket, int argc, char *argv[])
     Console_Println(socket, "Available commands:");
     for (size_t i = 0; i < ARRAY_SIZE(console_commands); i++)
         Console_Println(socket, "* %-15s - %s", console_commands[i].name, console_commands[i].help);
+
+    return SUCCESS;
 }
 
-void Console_CmdEnroll(int socket, int argc, char *argv[])
+ErrorCode Console_CmdRead(int socket, int argc, char *argv[])
 {
-    Core_EventNotify(CORE_EVENT_ENROLL);
-    Console_Println(socket, "Start PUF enrollment");
+    if (argc != 2)
+    {
+        Console_Println(socket, "usage: %s <nvs_key>", argv[0]);
+        return FAILURE;
+    }
+
+    Buffer buffer;
+    bool find = Nvs_GetBuffer(NVS_DEVICE_CERT_KEY, &buffer);
+    if (!find)
+    {
+        Console_Println(socket, "ERROR 404");
+        return FAILURE;
+    }
+
+    char printBuf[250 + 1] = {0};
+    int remaining = buffer.length;
+    int i = 0;
+    while (remaining > 0)
+    {
+        int bytesToWrite = remaining > 250 ? 250 : remaining;
+        memcpy(printBuf, (buffer.buffer + i), bytesToWrite);
+        Console_Printf(socket, "%.*s", bytesToWrite, printBuf);
+    }
+
+    Console_Printf(socket, "\n");
+    free(buffer.buffer);
+    return SUCCESS;
 }
 
-void Console_CmdPrintPuf(int socket, int argc, char *argv[])
+ErrorCode Console_CmdEnroll(int socket, int argc, char *argv[])
+{
+    Console_Println(socket, "Start PUF enrollment");
+    Core_EventNotify(CORE_EVENT_ENROLL);
+    return SUCCESS;
+}
+
+ErrorCode Console_CmdPuf(int socket, int argc, char *argv[])
 {
     bool puf_ok = get_puf_response();
     if (PUF_STATE == RESPONSE_READY && puf_ok)
     {
         Console_Println(socket, "PUF Bytes: %d", PUF_RESPONSE_LEN);
         for (size_t i = 0; i < PUF_RESPONSE_LEN; i++)
-        {
             Console_Printf(socket, "0x%02X, ", PUF_RESPONSE[i]);
-        }
+
         Console_Println(socket, "\n");
     }
     else
@@ -95,50 +132,73 @@ void Console_CmdPrintPuf(int socket, int argc, char *argv[])
     }
 
     clean_puf_response();
+    return SUCCESS;
 }
 
-void Console_CmdChallenge(int socket, int argc, char *argv[])
+ErrorCode Console_CmdChallenge(int socket, int argc, char *argv[])
 {
     if (argc != 2)
     {
         Console_Println(socket, "usage: %s <challenge>", argv[0]);
+        return FAILURE;
     }
 
     char chall[STR_CHALL_MAX_LEN] = {0};
     size_t length = snprintf(chall, STR_CHALL_MAX_LEN, "%s", argv[1]);
     Core_EventNotifyData(CORE_EVENT_PUF_CHALLENGE, chall, length + 1);
+    return SUCCESS;
 }
 
-void Console_GenEccKey(int socket, int argc, char *argv[])
+ErrorCode Console_CmdRefreshCrt(int socket, int argc, char *argv[])
 {
-    bool puf_ok = get_puf_response();
-    if (PUF_STATE == RESPONSE_READY && puf_ok)
+    /* create temporary cert */
+    Buffer csr;
+    ErrorCode err = Crypto_RefreshCertificate(&csr);
+
+    if (!err)
     {
-        uint8_t PUF[32] = {0};
-        memcpy(PUF, PUF_RESPONSE, sizeof(PUF));
-
-        // char *CSR = (char *)malloc(1000 * sizeof(char));
-
-        uint16_t csr_buf_size = 500;
-        uint8_t *csr_buf = (uint8_t *)calloc(csr_buf_size, sizeof(uint8_t));
-        memset(csr_buf, 0, csr_buf_size);
-
-        Crypto_GetECDSAKey(PUF, csr_buf, csr_buf_size);
-
-        char buf[250 + 1] = {0};
-        memcpy(buf, csr_buf, 250);
-        Console_Printf(socket, "%s", buf);
-        memcpy(buf, (csr_buf + 250), 250);
-        Console_Printf(socket, "%s", buf);
-
-        free(csr_buf);
-    }
-    else
-    {
-        Console_Println(socket, "PUF is not available");
+        char printBuf[250 + 1] = {0};
+        int remaining = csr.length;
+        int i = 0;
+        while (remaining > 0)
+        {
+            int bytesToWrite = remaining > 250 ? 250 : remaining;
+            memcpy(printBuf, (csr.buffer + i), bytesToWrite);
+            Console_Printf(socket, "%.*s", bytesToWrite, printBuf);
+        }
     }
 
-    clean_puf_response();
+    free(csr.buffer);
+    return err;
+}
+
+ErrorCode Console_CmdStoreCrt(int socket, int argc, char *argv[])
+{
+    if (argc != 2)
+    {
+        Console_Println(socket, "usage: %s <certificate>", argv[0]);
+        return FAILURE;
+    }
+
+    char certStr[500] = {0};
+    size_t length = snprintf(certStr, sizeof(certStr), "-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----", argv[1]);
+
+    Buffer cert = {.buffer = (uint8_t *)certStr, .length = length};
+    Nvs_SetBuffer(NVS_DEVICE_CERT_KEY_TMP, cert);
+
+    Core_EventNotify(CORE_EVENT_CERT_ROTATION);
+
+    Buffer deviceCert;
+    bool findCert = Nvs_GetBuffer(NVS_DEVICE_CERT_KEY_TMP, &deviceCert);
+    if (!findCert)
+    {
+        ESP_LOGE(TAG, "Device certificate not found");
+        return FAILURE;
+    }
+
+    ESP_LOGI(TAG, "Stored certificate:\n%.*s", deviceCert.length, deviceCert.buffer);
+    free(deviceCert.buffer);
+    return SUCCESS;
 }
 
 void Console_RunCommand(const int socket, char *command)
@@ -159,8 +219,12 @@ void Console_RunCommand(const int socket, char *command)
         if (!strcmp(console_commands[i].name, argv[0]))
         {
             ESP_LOGI(TAG, "received command: %s", command);
-            console_commands[i].handler(socket, argc, argv);
-            Console_Println(socket, "+OK");
+            ErrorCode error = console_commands[i].handler(socket, argc, argv);
+            if (error)
+                Console_Println(socket, "-ERR: Failure");
+            else
+                Console_Println(socket, "+OK");
+
             return;
         }
     }
@@ -171,7 +235,7 @@ void Console_RunCommand(const int socket, char *command)
 static void Console_GetCommand(const int socket)
 {
     int length;
-    char cmd[128];
+    char cmd[500];
 
     do
     {

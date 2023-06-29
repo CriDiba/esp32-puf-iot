@@ -43,14 +43,32 @@ static void Nvs_SetBlob(const char *key, const uint8_t *blob, size_t length)
     nvs_close(nvs_handle);
 }
 
+bool Nvs_CheckKey(const char *key)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    ESP_ERROR_CHECK(err);
+
+    size_t length = 0;
+    err = nvs_get_blob(nvs_handle, key, NULL, &length);
+    nvs_close(nvs_handle);
+
+    if (err != ESP_OK)
+    {
+        return false;
+    }
+
+    return true;
+}
+
 void Nvs_SetString(const char *key, String string)
 {
     Nvs_SetBlob(key, (uint8_t *)string.string, string.length);
 }
 
-void Nvs_GetString(const char *key, String *string)
+bool Nvs_GetString(const char *key, String *string)
 {
-    Nvs_GetBlob(key, (uint8_t **)&string->string, &string->length);
+    return Nvs_GetBlob(key, (uint8_t **)&string->string, &string->length);
 }
 
 void Nvs_SetBuffer(const char *key, Buffer buffer)
@@ -58,7 +76,7 @@ void Nvs_SetBuffer(const char *key, Buffer buffer)
     Nvs_SetBlob(key, buffer.buffer, buffer.length);
 }
 
-void Nvs_GetBuffer(const char *key, Buffer *buffer)
+bool Nvs_GetBuffer(const char *key, Buffer *buffer)
 {
-    Nvs_GetBlob(key, &buffer->buffer, &buffer->length);
+    return Nvs_GetBlob(key, &buffer->buffer, &buffer->length);
 }

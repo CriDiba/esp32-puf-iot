@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/error.h"
 #include "define.h"
 
 #define MQTT_BUFFER_SIZE 2048
@@ -14,11 +15,11 @@
 
 typedef void (*MqttCallback)(CString topic, CBuffer payload);
 
-void Mqtt_Init(MqttCallback callback);
-void Mqtt_ProcessLoop(void);
-void Mqtt_Connect(CString clientId, bool *sessionPresent);
-void Mqtt_Disconnect(bool force);
-void Mqtt_Publish(CString topic, CBuffer data);
-void Mqtt_Subscribe(CString topicFilter);
-void Mqtt_Unsubscribe(CString topicFilter);
+ErrorCode Mqtt_Init(MqttCallback callback);
+ErrorCode Mqtt_ProcessLoop(void);
+ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry);
+ErrorCode Mqtt_Disconnect(bool force);
+ErrorCode Mqtt_Publish(CString topic, CBuffer data);
+ErrorCode Mqtt_Subscribe(CString topicFilter);
+ErrorCode Mqtt_Unsubscribe(CString topicFilter);
 bool Mqtt_IsConnected(void);

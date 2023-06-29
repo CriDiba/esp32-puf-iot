@@ -10,3 +10,10 @@ sdkconfig.old
 
 # .DS_Store
 .DS_Store
+
+# AWS response
+aws_response.json
+aws/*.zip
+
+# node-modules
+node_modules

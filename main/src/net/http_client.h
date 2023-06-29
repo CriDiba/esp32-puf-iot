@@ -1,3 +1,5 @@
 #pragma once
 
-void Http_SendResponse(const char *response);
+#include "core/error.h"
+
+ErrorCode Http_SendResponse(const char *response);

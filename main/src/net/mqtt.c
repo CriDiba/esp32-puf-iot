@@ -1,8 +1,5 @@
-#include "core_mqtt.h"
-
-#include <stdio.h>
 #include <sys/time.h>
-
+#include "core_mqtt.h"
 #include "esp_log.h"
 
 #include "net/tls_transport.h"
@@ -10,9 +7,6 @@
 #include "define.h"
 
 static const char *TAG = "MQTT";
-
-#define MQTT_ENDPOINT "a1g70oszu4t891-ats.iot.eu-west-1.amazonaws.com"
-#define MQTT_PORT 8883
 
 static void Mqtt_Callback(struct MQTTContext *pContext, struct MQTTPacketInfo *pPacketInfo, struct MQTTDeserializedInfo *pDeserializedInfo);
 
@@ -39,17 +33,21 @@ bool Mqtt_IsConnected(void)
     return mqtt_ctx.connectStatus == MQTTConnected;
 }
 
-void Mqtt_ProcessLoop(void)
+ErrorCode Mqtt_ProcessLoop(void)
 {
+    ESP_LOGI(TAG, "PROCESSO IL LOOP DI MQTT");
     MQTTStatus_t status = MQTT_ProcessLoop(&mqtt_ctx);
 
     if (status != MQTTSuccess)
     {
         ESP_LOGE(TAG, "MQTT process loop failed: %s", MQTT_Status_strerror(status));
+        return ESP_FAIL;
     }
+
+    return SUCCESS;
 }
 
-void Mqtt_Init(MqttCallback callback)
+ErrorCode Mqtt_Init(MqttCallback callback)
 {
     mqtt_callback = callback;
 
@@ -64,14 +62,19 @@ void Mqtt_Init(MqttCallback callback)
     /* initialize MQTT library */
     MQTTStatus_t status = MQTT_Init(&mqtt_ctx, &mqtt_transportInterface, Mqtt_GetTimeMsFunction, Mqtt_Callback, &mqtt_fixedBuffer);
     if (status != MQTTSuccess)
+    {
         ESP_LOGE(TAG, "init failed: %s", MQTT_Status_strerror(status));
+        return FAILURE;
+    }
+
+    return SUCCESS;
 }
 
-void Mqtt_Connect(CString clientId, bool *sessionPresent)
+ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry)
 {
     ESP_LOGI(TAG, "connecting to broker...");
 
-    TLSTransport_Connect(mqtt_transportInterface.pNetworkContext);
+    ERROR_CHECK(TLSTransport_Connect(mqtt_transportInterface.pNetworkContext));
 
     MQTTConnectInfo_t connectInfo = {
         .pClientIdentifier = clientId.string,
@@ -87,12 +90,18 @@ void Mqtt_Connect(CString clientId, bool *sessionPresent)
     MQTTStatus_t status = MQTT_Connect(&mqtt_ctx, &connectInfo, NULL, MQTT_CONNECT_TIMEOUT_SECONDS, sessionPresent);
 
     if (status != MQTTSuccess)
+    {
         ESP_LOGE(TAG, "MQTT connection failed: %s", MQTT_Status_strerror(status));
-    else
-        ESP_LOGI(TAG, "successfully connected to MQTT broker");
+        if (retry)
+            return Mqtt_Connect(clientId, sessionPresent, false);
+        return FAILURE;
+    }
+
+    ESP_LOGI(TAG, "successfully connected to MQTT broker");
+    return SUCCESS;
 }
 
-void Mqtt_Disconnect(bool force)
+ErrorCode Mqtt_Disconnect(bool force)
 {
     ESP_LOGI(TAG, "disconnecting from MQTT broker...");
 
@@ -104,13 +113,13 @@ void Mqtt_Disconnect(bool force)
     }
 
     ESP_LOGI(TAG, "closing TLS socket...");
-
     TLSTransport_Disconnect(mqtt_transportInterface.pNetworkContext, force);
-    mqtt_ctx.connectStatus = MQTTNotConnected;
     ESP_LOGI(TAG, "now disconnected from server");
+    mqtt_ctx.connectStatus = MQTTNotConnected;
+    return SUCCESS;
 }
 
-void Mqtt_Publish(CString topic, CBuffer data)
+ErrorCode Mqtt_Publish(CString topic, CBuffer data)
 {
     ESP_LOGI(TAG, "publish packet");
 
@@ -127,12 +136,15 @@ void Mqtt_Publish(CString topic, CBuffer data)
 
     MQTTStatus_t status = MQTT_Publish(&mqtt_ctx, &publishInfo, packet_id);
     if (status != MQTTSuccess)
+    {
         ESP_LOGE(TAG, "publish failure: %s", MQTT_Status_strerror(status));
-    else
-        ESP_LOGI(TAG, "published packet %u", packet_id);
+        return FAILURE;
+    }
+    ESP_LOGI(TAG, "published packet %u", packet_id);
+    return SUCCESS;
 }
 
-void Mqtt_Subscribe(CString topicFilter)
+ErrorCode Mqtt_Subscribe(CString topicFilter)
 {
     ESP_LOGI(TAG, "subscribe to topic");
 
@@ -146,9 +158,13 @@ void Mqtt_Subscribe(CString topicFilter)
 
     MQTTStatus_t status = MQTT_Subscribe(&mqtt_ctx, &subscribeInfo, 1, packet_id);
     if (status != MQTTSuccess)
+    {
         ESP_LOGE(TAG, "subscribe failure: %s", MQTT_Status_strerror(status));
-    else
-        ESP_LOGI(TAG, "subscribe to topic %s sent (packet id: %u)", topicFilter.string, packet_id);
+        return FAILURE;
+    }
+
+    ESP_LOGI(TAG, "subscribe to topic %s sent (packet id: %u)", topicFilter.string, packet_id);
+    return SUCCESS;
 }
 
 static void Mqtt_Callback(struct MQTTContext *pContext, struct MQTTPacketInfo *pPacketInfo, struct MQTTDeserializedInfo *pDeserializedInfo)
