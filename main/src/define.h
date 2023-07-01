@@ -20,13 +20,13 @@
 #define MGT_TOPIC_FILTER "management/esp32-cris/+"
 
 // NVS Keys
-#define NVS_DEVICE_CERT_KEY "nvs-device-cert"
-#define NVS_DEVICE_CSR_KEY "nvs-device-csr"
-#define NVS_DEVICE_SALT_KEY "ecc-salt"
+#define NVS_DEVICE_CERT_KEY "tls-crt"
+#define NVS_DEVICE_CSR_KEY "tls-csr"
+#define NVS_DEVICE_SALT_KEY "tls-salt"
 
-#define NVS_DEVICE_CERT_KEY_TMP "nvs-device-cert-tmp"
-#define NVS_DEVICE_CSR_KEY_TMP "nvs-device-csr-tmp"
-#define NVS_DEVICE_SALT_KEY_TMP "ecc-salt-tmp"
+#define NVS_DEVICE_CERT_KEY_TMP "tls-crt-tmp"
+#define NVS_DEVICE_CSR_KEY_TMP "tls-csr-tmp"
+#define NVS_DEVICE_SALT_KEY_TMP "tls-salt-tmp"
 
 #define STR_CHALL_MAX_LEN 20
 

@@ -48,7 +48,7 @@ ErrorCode Crypto_GetRandomSalt(Buffer *outSalt)
     ERROR_CHECK(err);
 
     err = mbedtls_ctr_drbg_random(&ctrDrbg, outSalt->buffer, outSalt->length);
-    ESP_LOGI(TAG, "generate random salt: %.*s", outSalt->length, outSalt->buffer);
+    ESP_LOGD(TAG, "generated salt: %.*s", outSalt->length, outSalt->buffer);
 
     mbedtls_ctr_drbg_free(&ctrDrbg);
     mbedtls_entropy_free(&entropy);
@@ -181,6 +181,7 @@ ErrorCode Crypto_RefreshCertificate(Buffer *outCsr)
     /* generate csr */
     ESP_LOGI(TAG, "generate CSR from keypair");
     err = Crypto_GenerateCSR(&eccPkCtx, subject, outCsr);
+    ESP_LOGI(TAG, "CSR succesfully generated");
     ERROR_CHECK(err);
     Nvs_SetBuffer(NVS_DEVICE_CSR_KEY_TMP, *outCsr);
 

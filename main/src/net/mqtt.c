@@ -35,7 +35,7 @@ bool Mqtt_IsConnected(void)
 
 ErrorCode Mqtt_ProcessLoop(void)
 {
-    ESP_LOGI(TAG, "PROCESSO IL LOOP DI MQTT");
+    ESP_LOGI(TAG, "process MQTT Loop");
     MQTTStatus_t status = MQTT_ProcessLoop(&mqtt_ctx);
 
     if (status != MQTTSuccess)
@@ -74,7 +74,11 @@ ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry)
 {
     ESP_LOGI(TAG, "connecting to broker...");
 
-    ERROR_CHECK(TLSTransport_Connect(mqtt_transportInterface.pNetworkContext));
+    ErrorCode err = TLSTransport_Connect(mqtt_transportInterface.pNetworkContext);
+    if (err && !retry)
+    {
+        return FAILURE;
+    }
 
     MQTTConnectInfo_t connectInfo = {
         .pClientIdentifier = clientId.string,

@@ -24,7 +24,9 @@
 #define CORE_TASK_QUEUE_SIZE 10
 #define CORE_TASK_PERIOD_MS 500
 
-#define STATE_UPDATE_INTERVAL 2000
+#define STATE_UPDATE_INTERVAL 60000
+
+#define CLOUD_RECONNECTION_INTERVAL 60000
 
 static const char *TAG = "Core";
 
@@ -37,6 +39,7 @@ static struct
 {
     CoreState state;
     uint32_t lastStatePutTimestamp;
+    uint32_t lastCloudConnectionTimestamp;
     bool isCertificateRotationEnabled;
 } coreState = {0};
 
@@ -75,7 +78,7 @@ static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
     break;
 
     case CORE_EVENT_CERT_ROTATION:
-
+        Core_OnRotateCRT();
         break;
     default:
         ESP_LOGI(TAG, "unhandled core event: %d", event_id);
@@ -102,7 +105,6 @@ static void Core_CloudConnect()
 
 static void Core_CloudProcessLoop(uint32_t timestamp)
 {
-    ESP_LOGI(TAG, "QUI");
     // send periodic state update
     if (timestamp - coreState.lastStatePutTimestamp > STATE_UPDATE_INTERVAL)
     {
@@ -231,6 +233,8 @@ static void Core_OnReceiveCRT(CBuffer certPayload)
 
 static void Core_OnRotateCRT()
 {
+    ESP_LOGI(TAG, "start certificate update");
+
     Buffer csr, crt, salt;
     bool findCsr = Nvs_GetBuffer(NVS_DEVICE_CSR_KEY_TMP, &csr);
     bool findCrt = Nvs_GetBuffer(NVS_DEVICE_CERT_KEY_TMP, &crt);
@@ -246,6 +250,8 @@ static void Core_OnRotateCRT()
     free(csr.buffer);
     free(crt.buffer);
     free(salt.buffer);
+
+    ESP_LOGI(TAG, "sucessfully updated certificate");
 }
 
 const char *Core_GetCrtNvsKey()
@@ -317,16 +323,20 @@ static void Core_TaskMain(void *pvParameters)
 
     while (true)
     {
-        ESP_LOGI(TAG, "running core task");
-        ESP_LOGI(TAG, "STATE: %d\n", coreState.state);
+        ESP_LOGI(TAG, "running core task (%d)", coreState.state);
 
         timestamp = Time_GetTimeMs();
 
         switch (coreState.state)
         {
         case CORE_STATE_ONLINE:
-            /* connect to cloud */
-            Core_CloudConnect();
+            if ((timestamp - coreState.lastCloudConnectionTimestamp > CLOUD_RECONNECTION_INTERVAL) || coreState.lastCloudConnectionTimestamp == 0)
+            {
+                coreState.lastCloudConnectionTimestamp = timestamp;
+                /* connect to cloud */
+                Core_CloudConnect();
+            }
+
             break;
         case CORE_STATE_CLOUD_CONNECTED:
             Core_CloudProcessLoop(timestamp);

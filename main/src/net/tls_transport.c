@@ -52,14 +52,12 @@ static void PrintError(int errorCode, const char *reason)
 
 int32_t TLSTransport_Recv(struct NetworkContext *ctx, void *pBuffer, size_t bytesToRecv)
 {
-    ESP_LOGI(TAG, "MBEDTLS READ BYTES TO RECV %d\n", bytesToRecv);
-
     int result = mbedtls_ssl_read(&ctx->ssl, pBuffer, bytesToRecv);
 
-    ESP_LOGI(TAG, "MBEDTLS RESULT %d\n", result);
-
-    if (result < 0)
+    if (result < 0 && result != MBEDTLS_ERR_SSL_TIMEOUT)
+    {
         PrintError(result, "read error");
+    }
 
     return result;
 }
@@ -176,6 +174,7 @@ ErrorCode TLSTransport_Connect(struct NetworkContext *ctx)
 
     /* setup network */
     mbedtls_ssl_set_bio(&ctx->ssl, &ctx->net, mbedtls_net_send, mbedtls_net_recv, mbedtls_net_recv_timeout);
+    mbedtls_ssl_conf_read_timeout(&ctx->config, 500);
 
     /* setup for SNI */
     error = mbedtls_ssl_set_hostname(&ctx->ssl, ctx->hostname);

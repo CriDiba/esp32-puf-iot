@@ -43,7 +43,7 @@ static void Console_vprintf(int socket, const char *fmt, va_list args)
     char buffer[256] = {0};
     int length = vsnprintf(buffer, sizeof(buffer), fmt, args);
 
-    printf("=>> %s ", buffer);
+    // printf("=>> %s ", buffer);
 
     send(socket, buffer, length, 0);
 }
@@ -86,7 +86,7 @@ ErrorCode Console_CmdRead(int socket, int argc, char *argv[])
     }
 
     Buffer buffer;
-    bool find = Nvs_GetBuffer(NVS_DEVICE_CERT_KEY, &buffer);
+    bool find = Nvs_GetBuffer(argv[1], &buffer);
     if (!find)
     {
         Console_Println(socket, "ERROR 404");
@@ -101,6 +101,8 @@ ErrorCode Console_CmdRead(int socket, int argc, char *argv[])
         int bytesToWrite = remaining > 250 ? 250 : remaining;
         memcpy(printBuf, (buffer.buffer + i), bytesToWrite);
         Console_Printf(socket, "%.*s", bytesToWrite, printBuf);
+        remaining = remaining - bytesToWrite;
+        i = i + bytesToWrite;
     }
 
     Console_Printf(socket, "\n");
@@ -165,6 +167,8 @@ ErrorCode Console_CmdRefreshCrt(int socket, int argc, char *argv[])
             int bytesToWrite = remaining > 250 ? 250 : remaining;
             memcpy(printBuf, (csr.buffer + i), bytesToWrite);
             Console_Printf(socket, "%.*s", bytesToWrite, printBuf);
+            remaining = remaining - bytesToWrite;
+            i = i + bytesToWrite;
         }
     }
 
@@ -336,5 +340,5 @@ failure:
 
 void Console_TaskStart(void)
 {
-    xTaskCreate(Console_TaskTcpConsole, "tcp_console_task", 8192, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
+    xTaskCreate(Console_TaskTcpConsole, "tcp_console_task", 10000, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
 }
