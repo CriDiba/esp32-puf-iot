@@ -35,10 +35,9 @@ fi
 
 if [ "$operation" = "refresh" ]
 then
-    echo "Client ID: "; read client_id
     echo "Certificate Id: "; read certificate_id
 
-    EVENT_PAYLOAD=$(printf '{"clientid": "%s", "certificateId": "%s"}' "$client_id" "$certificate_id")
+    EVENT_PAYLOAD=$(printf '{"certificateId": "%s", "refresh": true}' "$certificate_id")
 
     aws lambda invoke \
         --function-name certRotationFn \

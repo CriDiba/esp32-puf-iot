@@ -74,8 +74,9 @@ export async function verifyCSR(csrPem) {
 
   // get signed certificate
   const certPem = cert.getPEM();
+  const certPemNormalized = certPem.replace(/[\r]+/g, "");
 
   console.log("Certificate created.");
 
-  return certPem;
+  return certPemNormalized;
 }
