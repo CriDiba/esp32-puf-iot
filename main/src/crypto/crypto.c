@@ -33,8 +33,6 @@ static const char *TAG = "Crypto";
 
 ErrorCode Crypto_SeedCtrDrbg(mbedtls_ctr_drbg_context *ctrDrbg, mbedtls_entropy_context *entropy)
 {
-    mbedtls_ctr_drbg_init(ctrDrbg);
-    mbedtls_entropy_init(entropy);
     return mbedtls_ctr_drbg_seed(ctrDrbg, mbedtls_entropy_func, entropy, NULL, 0);
 }
 
@@ -44,6 +42,9 @@ ErrorCode Crypto_GetRandomSalt(Buffer *outSalt)
 
     mbedtls_ctr_drbg_context ctrDrbg;
     mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_init(&ctrDrbg);
+    mbedtls_entropy_init(&entropy);
+
     err = Crypto_SeedCtrDrbg(&ctrDrbg, &entropy);
     ERROR_CHECK(err);
 
@@ -62,7 +63,6 @@ ErrorCode Crypto_GetPuf(Buffer *outPuf)
 
     do
     {
-        printf("Provo a recuperare la PUF");
         clean_puf_response();
         puf_ok = get_puf_response();
     } while (!puf_ok);
@@ -100,14 +100,15 @@ ErrorCode Crypto_GenerateECCKey(mbedtls_pk_context *outputKey, Buffer puf, Buffe
     ERROR_CHECK(err);
 
     /* generate ecc key */
-    mbedtls_pk_init(outputKey);
     mbedtls_pk_setup(outputKey, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
     err = mbedtls_ecp_gen_key(ECPARAMS, mbedtls_pk_ec(*outputKey), mbedtls_hmac_drbg_random, &hmac_drbg);
     ERROR_CHECK(err);
 
     /* print key pem */
-    unsigned char buf[500] = {0};
-    err = mbedtls_pk_write_key_pem(outputKey, buf, sizeof(buf));
+    // unsigned char buf[500] = {0};
+    // err = mbedtls_pk_write_key_pem(outputKey, buf, sizeof(buf));
+
+    mbedtls_hmac_drbg_free(&hmac_drbg);
 
     return err;
 }
@@ -132,11 +133,19 @@ ErrorCode Crypto_GenerateCSR(mbedtls_pk_context *eccKey, CString certSubject, Bu
     /* rng */
     mbedtls_ctr_drbg_context ctrDrbg;
     mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_init(&ctrDrbg);
+    mbedtls_entropy_init(&entropy);
+
     err = Crypto_SeedCtrDrbg(&ctrDrbg, &entropy);
     ERROR_CHECK(err);
 
     /* get crs pem */
     err = mbedtls_x509write_csr_pem(&signing_req, outCsr->buffer, outCsr->length, mbedtls_ctr_drbg_random, &ctrDrbg);
+
+    mbedtls_x509write_csr_free(&signing_req);
+    mbedtls_ctr_drbg_free(&ctrDrbg);
+    mbedtls_entropy_free(&entropy);
+
     return err;
 }
 
@@ -144,6 +153,7 @@ ErrorCode Crypto_RefreshCertificate(Buffer *outCsr)
 {
     ErrorCode err = SUCCESS;
     mbedtls_pk_context eccPkCtx;
+    mbedtls_pk_init(&eccPkCtx);
 
     /* retrive puf */
     uint8_t pufBuf[PUF_LENGTH] = {0};
@@ -184,6 +194,7 @@ ErrorCode Crypto_RefreshCertificate(Buffer *outCsr)
     ESP_LOGI(TAG, "CSR succesfully generated");
     ERROR_CHECK(err);
     Nvs_SetBuffer(NVS_DEVICE_CSR_KEY_TMP, *outCsr);
+    mbedtls_pk_free(&eccPkCtx);
 
     return err;
 }
@@ -207,6 +218,8 @@ ErrorCode Crypto_GetECCKey(mbedtls_pk_context *eccKey)
     ERROR_CHECK(err);
 
     err = Crypto_GenerateECCKey(eccKey, puf, salt);
+
+    free(salt.buffer);
 
     return err;
 }

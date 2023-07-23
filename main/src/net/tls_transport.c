@@ -21,6 +21,7 @@ static const char *TAG = "TLS";
 
 extern const uint8_t server_cert_pem_start[] asm("_binary_amazon_rootca_crt_start");
 extern const uint8_t server_cert_pem_end[] asm("_binary_amazon_rootca_crt_end");
+// const char *client_crt = "-----BEGIN CERTIFICATE-----\nMIIBPzCB5QIJAPf/AflLn/3EMAoGCCqGSM49BAMCMB0xCzAJBgNVBAYTAklUMQ4wDAYDVQQKDAVVTklWUjAeFw0yMzA3MDQyMTM5NDRaFw0yNDA3MDMyMTM5NDRaMDIxCzAJBgNVBAYTAklUMRMwEQYDVQQDDAplc3AzMi1jcmlzMQ4wDAYDVQQKDAVVTklWUjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABNzrRSH7qZu5DVeY6rH0Aojqwi1itWfZNIkxDpkTqOZzmAGNv9Yz4SX1BBlPHdWDdF2LSIZq6DagiJGxRzk+OoIwCgYIKoZIzj0EAwIDSQAw\nRgIhAIi1NvkvwGVOgBUUmd+YSUSiBp+3eDzCy4hyUe+7PF33AiEA7EztUGvvc+Ne1qWhczZnAYsIcWtyIBQgMFKHZ2bXDr4=\n-----END CERTIFICATE-----";
 
 struct NetworkContext
 {
@@ -58,6 +59,9 @@ int32_t TLSTransport_Recv(struct NetworkContext *ctx, void *pBuffer, size_t byte
     {
         PrintError(result, "read error");
     }
+
+    if (result == MBEDTLS_ERR_SSL_TIMEOUT)
+        return 0;
 
     return result;
 }
@@ -115,6 +119,7 @@ ErrorCode TLSTransport_Connect(struct NetworkContext *ctx)
     mbedtls_ssl_init(&ctx->ssl);
     mbedtls_net_init(&ctx->net);
     mbedtls_x509_crt_init(&ctx->rootCertificate);
+    mbedtls_pk_init(&ctx->privateKey);
 
     /* init config */
     int error = mbedtls_ssl_config_defaults(&ctx->config, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
@@ -143,6 +148,10 @@ ErrorCode TLSTransport_Connect(struct NetworkContext *ctx)
         mbedtls_x509_crt_init(&ctx->clientCertificate);
 
         error = mbedtls_x509_crt_parse(&ctx->clientCertificate, deviceCert.buffer, 1 + strlen((char *)deviceCert.buffer));
+
+        // DEBUG
+        // error = mbedtls_x509_crt_parse(&ctx->clientCertificate, (uint8_t *)client_crt, 1 + strlen((char *)client_crt));
+
         free(deviceCert.buffer);
 
         if (error)
@@ -152,7 +161,6 @@ ErrorCode TLSTransport_Connect(struct NetworkContext *ctx)
         }
 
         ESP_LOGI(TAG, "cloud: loading client private key...");
-        mbedtls_pk_init(&ctx->privateKey);
         Crypto_GetECCKey(&ctx->privateKey);
 
         if (error)

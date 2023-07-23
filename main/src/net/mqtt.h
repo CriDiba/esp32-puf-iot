@@ -17,7 +17,7 @@ typedef void (*MqttCallback)(CString topic, CBuffer payload);
 
 ErrorCode Mqtt_Init(MqttCallback callback);
 ErrorCode Mqtt_ProcessLoop(void);
-ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry);
+ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, int retry);
 ErrorCode Mqtt_Disconnect(bool force);
 ErrorCode Mqtt_Publish(CString topic, CBuffer data);
 ErrorCode Mqtt_Subscribe(CString topicFilter);

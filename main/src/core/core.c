@@ -17,6 +17,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "cJSON.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@
 #define CORE_TASK_QUEUE_SIZE 10
 #define CORE_TASK_PERIOD_MS 500
 
-#define STATE_UPDATE_INTERVAL 60000
+#define STATE_UPDATE_INTERVAL 5000
 
 #define CLOUD_RECONNECTION_INTERVAL 60000
 
@@ -53,6 +54,7 @@ static void Core_OnChallenge(char *challenge);
 static void Core_OnCreateCSR();
 static void Core_OnReceiveCRT(CBuffer certPayload);
 static void Core_OnRotateCRT();
+static void Core_OnCertRefresh();
 
 static uint32_t Time_GetTimeMs();
 
@@ -80,6 +82,9 @@ static void Core_EventHandler(void *arg, esp_event_base_t event_base, int32_t ev
     case CORE_EVENT_CERT_ROTATION:
         Core_OnRotateCRT();
         break;
+    case CORE_EVENT_CERT_REFRESH:
+        Core_OnCertRefresh();
+        break;
     default:
         ESP_LOGI(TAG, "unhandled core event: %d", event_id);
         break;
@@ -90,7 +95,7 @@ static void Core_CloudConnect()
 {
     /* connect to mqtt broker */
     bool sessionPresent = false;
-    ErrorCode err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, true);
+    ErrorCode err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, 1);
 
     if (err)
         return;
@@ -128,9 +133,9 @@ static void Core_CloudProcessLoop(uint32_t timestamp)
 static void Core_CloudCallback(CString topic, CBuffer payload)
 {
     /* this callback is invoked at each publish message received from MQTT */
-    ESP_LOGI(TAG, "received message from cloud");
-    printf("TOPIC=%.*s\r\n", topic.length, topic.string);
-    printf("DATA=%.*s\r\n", payload.length, payload.buffer);
+    ESP_LOGI(TAG, "received message from cloud. Topic: %.*s", topic.length, topic.string);
+    // printf("TOPIC=%.*s\r\n", topic.length, topic.string);
+    // printf("DATA=%.*s\r\n", payload.length, payload.buffer);
 
     if (strncmp(topic.string, CSR_REQ_TOPIC, topic.length) == 0)
     {
@@ -168,6 +173,8 @@ static void Core_OnChallenge(char *challenge)
 
 static void Core_OnCreateCSR()
 {
+    ESP_LOGI(TAG, "start CSR generation");
+
     /* create temporary cert */
     Buffer csr;
     ErrorCode err = Crypto_RefreshCertificate(&csr);
@@ -181,8 +188,6 @@ static void Core_OnCreateCSR()
         CString topic = mkCSTRING(CSR_RES_TOPIC);
         Mqtt_Publish(topic, data);
         free(dataBuf);
-
-        coreState.isCertificateRotationEnabled = true;
     }
 
     free(csr.buffer);
@@ -190,32 +195,54 @@ static void Core_OnCreateCSR()
 
 static void Core_OnReceiveCRT(CBuffer certPayload)
 {
+    ESP_LOGI(TAG, "received new CRT");
+
+    const cJSON *certificatePem = NULL;
+    const cJSON *length = NULL;
+
     /* parse cert message */
-    char *certRawStr = (char *)calloc(certPayload.length, sizeof(char));
-    memcpy(certRawStr, certPayload.buffer, certPayload.length);
-    char *certStr = strtok(certRawStr, "\"certificatePem\":\"");
-    certStr = strtok(NULL, "\"");
+    cJSON *certJson = cJSON_ParseWithLength((char *)certPayload.buffer, certPayload.length);
+    certificatePem = cJSON_GetObjectItemCaseSensitive(certJson, "certificatePem");
+    length = cJSON_GetObjectItemCaseSensitive(certJson, "length");
+
+    if (!cJSON_IsString(certificatePem) || !cJSON_IsNumber(length))
+    {
+        cJSON_Delete(certJson);
+        return;
+    }
 
     /* save temporary cert */
-    Buffer cert = {.buffer = (uint8_t *)certStr, .length = strlen(certStr)};
+    Buffer cert = {.buffer = (uint8_t *)certificatePem->valuestring, .length = length->valueint};
     Nvs_SetBuffer(NVS_DEVICE_CERT_KEY_TMP, cert);
+    cJSON_Delete(certJson);
+
+    /* send event to core to test new connection */
+    Core_EventNotify(CORE_EVENT_CERT_REFRESH);
+}
+
+static void Core_OnCertRefresh()
+{
+    ESP_LOGI(TAG, "start certificate rotation");
+    coreState.isCertificateRotationEnabled = true;
 
     /* disconnect from cloud */
-    ErrorCode err = Mqtt_Disconnect(true);
+    ErrorCode err = Mqtt_Disconnect(false);
     if (err)
         return;
 
     /* connect using new certificate */
     bool sessionPresent = false;
-    err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, true);
+    err = Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, 3);
 
-    const char *dataBuf = "{}";
+    char *dataBuf = "{}";
     CBuffer data = {.buffer = (uint8_t *)dataBuf, .length = strlen(dataBuf)};
+    coreState.isCertificateRotationEnabled = false;
 
     if (err)
     {
         /* failure, send ERR message */
-        ESP_LOGI(TAG, "rotation: failure on connection with new cert");
+        ESP_LOGE(TAG, "rotation: failure on connection with new cert");
+        Mqtt_Connect(mkCSTRING(DEVICE_ID), &sessionPresent, 3);
         CString topic = mkCSTRING(CRT_ERR_TOPIC);
         Mqtt_Publish(topic, data);
         return;
@@ -223,7 +250,6 @@ static void Core_OnReceiveCRT(CBuffer certPayload)
 
     /* success, rotate certificates */
     Core_OnRotateCRT();
-    coreState.isCertificateRotationEnabled = false;
 
     /* send ACK message */
     ESP_LOGI(TAG, "rotation: successfully connected with new cert");
@@ -245,13 +271,12 @@ static void Core_OnRotateCRT()
         Nvs_SetBuffer(NVS_DEVICE_CSR_KEY, csr);
         Nvs_SetBuffer(NVS_DEVICE_CERT_KEY, crt);
         Nvs_SetBuffer(NVS_DEVICE_SALT_KEY, salt);
+        ESP_LOGI(TAG, "sucessfully updated certificate");
     }
 
     free(csr.buffer);
     free(crt.buffer);
     free(salt.buffer);
-
-    ESP_LOGI(TAG, "sucessfully updated certificate");
 }
 
 const char *Core_GetCrtNvsKey()
@@ -285,6 +310,7 @@ static void Core_TaskSetup(void)
 {
     if (!is_puf_configured())
     {
+        ESP_LOGI(TAG, "PUF not configured, start enrollment...");
         Core_EnrollPuf();
     }
 
@@ -323,7 +349,9 @@ static void Core_TaskMain(void *pvParameters)
 
     while (true)
     {
-        ESP_LOGI(TAG, "running core task (%d)", coreState.state);
+        ESP_LOGD(TAG, "running core task (%d)", coreState.state);
+        ESP_LOGD(TAG, "free memory: %d bytes", esp_get_free_heap_size());
+        ESP_LOGD(TAG, "task watermark: %d bytes", uxTaskGetStackHighWaterMark(NULL));
 
         timestamp = Time_GetTimeMs();
 
@@ -384,5 +412,5 @@ void Core_TaskStart(void)
     Core_TaskSetup();
 
     /* start task core */
-    xTaskCreate(Core_TaskMain, "core_task", 4096, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
+    xTaskCreate(Core_TaskMain, "core_task", 20000, NULL, uxTaskPriorityGet(NULL) + 1, NULL);
 }

@@ -1,6 +1,8 @@
 #include <sys/time.h>
 #include "core_mqtt.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "net/tls_transport.h"
 #include "net/mqtt.h"
@@ -70,7 +72,7 @@ ErrorCode Mqtt_Init(MqttCallback callback)
     return SUCCESS;
 }
 
-ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry)
+ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, int retry)
 {
     ESP_LOGI(TAG, "connecting to broker...");
 
@@ -96,8 +98,12 @@ ErrorCode Mqtt_Connect(CString clientId, bool *sessionPresent, bool retry)
     if (status != MQTTSuccess)
     {
         ESP_LOGE(TAG, "MQTT connection failed: %s", MQTT_Status_strerror(status));
-        if (retry)
-            return Mqtt_Connect(clientId, sessionPresent, false);
+        if (retry > 0)
+        {
+            Mqtt_Disconnect(true);
+            vTaskDelay(500 / portTICK_PERIOD_MS); // wait till sram really turns on and stabilizes (not necessary?)
+            return Mqtt_Connect(clientId, sessionPresent, retry - 1);
+        }
         return FAILURE;
     }
 

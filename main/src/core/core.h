@@ -10,6 +10,7 @@ typedef enum CoreEvent
     CORE_EVENT_ENROLL,
     CORE_EVENT_PUF_CHALLENGE,
     CORE_EVENT_CERT_ROTATION,
+    CORE_EVENT_CERT_REFRESH,
 } CoreEvent;
 
 typedef enum CoreState
