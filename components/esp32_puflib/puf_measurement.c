@@ -21,6 +21,7 @@
 #define PUFSLEEP_RESPONSE_SLEEP_uS (100000)
 #define PUF_HW_THRESHOLD_PERCENT (48.5)
 #define PUF_ERROR_THRESHOLD_PERCENT (0.15)
+#define MAX_PUF_ATTEMPTS 100
 
 uint8_t* RTC_FAST_MEMORY = (uint8_t*) RTC_FAST_MEMORY_ADDRESS;
 uint8_t __NOINIT_ATTR PUF_BUFFER[PUF_MEMORY_SIZE];
@@ -131,7 +132,7 @@ void get_pufsleep_bit_frequency(uint16_t **puf_freq, const size_t len, const siz
 
 
 bool get_puf_response() {
-    uint8_t * backup = backup_rtc_sram();
+    uint8_t *backup = backup_rtc_sram();
 
     // get stable bit mask
     uint8_t *mask;
@@ -143,33 +144,46 @@ bool get_puf_response() {
     uint8_t *ecc_data;
     size_t ecc_len;
     get_blob(&ecc_data, &ecc_len, ECC_DATA_KEY);
-    PUF_RESPONSE_LEN = ecc_len / 8; // 8x repetition code results in 8x smaller response
 
-    // measure PUF response and apply the mask
-    memset(RTC_FAST_MEMORY, 0x00, PUF_MEMORY_SIZE);
-    turn_off_rtc_sram(PUF_RESPONSE_SLEEP_uS);
+    bool puf_ok = false;
+    int sleep_us = PUF_RESPONSE_SLEEP_uS;
+    int attempts = 0;
 
-    double puf_hw_percent = (double) 100 * hamming_weight(RTC_FAST_MEMORY, PUF_MEMORY_SIZE) / (PUF_MEMORY_SIZE * 8);
+    do {
+        PUF_RESPONSE_LEN = ecc_len / 8; // 8x repetition code results in 8x smaller response
 
-    uint8_t *masked_puf = malloc(ecc_len);
-    apply_puf_mask(mask, ecc_len*8, RTC_FAST_MEMORY, PUF_MEMORY_SIZE, masked_puf, ecc_len);
+        // measure PUF response and apply the mask
+        memset(RTC_FAST_MEMORY, 0x00, PUF_MEMORY_SIZE);
+        turn_off_rtc_sram(sleep_us);
 
-    // correct the masked response using the ECC data
-    PUF_RESPONSE = malloc(PUF_RESPONSE_LEN);
-    int bit_errors = correct_data(masked_puf, ecc_data, ecc_len, PUF_RESPONSE, PUF_RESPONSE_LEN);
-    double puf_errors_percent = (double) 100 * bit_errors / (PUF_MEMORY_SIZE * 8);
+        double puf_hw_percent = (double)100 * hamming_weight(RTC_FAST_MEMORY, PUF_MEMORY_SIZE) / (PUF_MEMORY_SIZE * 8);
+
+        uint8_t *masked_puf = malloc(ecc_len);
+        apply_puf_mask(mask, ecc_len * 8, RTC_FAST_MEMORY, PUF_MEMORY_SIZE, masked_puf, ecc_len);
+
+        // correct the masked response using the ECC data
+        PUF_RESPONSE = malloc(PUF_RESPONSE_LEN);
+        int bit_errors = correct_data(masked_puf, ecc_data, ecc_len, PUF_RESPONSE, PUF_RESPONSE_LEN);
+        double puf_errors_percent = (double)100 * bit_errors / (PUF_MEMORY_SIZE * 8);
+
+        free(masked_puf);
+
+        PUF_STATE = RESPONSE_READY;
+
+        puf_ok = puf_hw_percent > PUF_HW_THRESHOLD_PERCENT && puf_errors_percent < PUF_ERROR_THRESHOLD_PERCENT;
+
+        if (!puf_ok) {
+            clean_puf_response();
+            sleep_us *= 2;
+            attempts += 1;
+        }
+
+    } while (!puf_ok && attempts < MAX_PUF_ATTEMPTS);
 
     restore_rtc_sram(backup);
     free(ecc_data);
     free(mask);
-    free(masked_puf);
 
-    PUF_STATE = RESPONSE_READY;
-
-    bool puf_ok = puf_hw_percent > PUF_HW_THRESHOLD_PERCENT && puf_errors_percent < PUF_ERROR_THRESHOLD_PERCENT;
-    if(!puf_ok) {
-        clean_puf_response();
-    }
     return puf_ok;
 }
 
