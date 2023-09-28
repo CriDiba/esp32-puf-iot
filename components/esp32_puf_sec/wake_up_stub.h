@@ -1,0 +1,4 @@
+#ifndef ESP32_PUF_WAKE_UP_STUB_H
+#define ESP32_PUF_WAKE_UP_STUB_H
+
+#endif // ESP32_PUF_WAKE_UP_STUB_H

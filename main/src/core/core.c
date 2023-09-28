@@ -5,7 +5,7 @@
 #include "net/http_client.h"
 #include "net/mqtt.h"
 #include "define.h"
-#include "puflib.h"
+#include "puf_sec.h"
 #include "core/nvs.h"
 #include "core/error.h"
 #include "crypto/crypto.h"

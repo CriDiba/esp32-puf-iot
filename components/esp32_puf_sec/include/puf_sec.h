@@ -1,21 +1,21 @@
-//
-// Ondrej Stanicek
-// staniond@fit.cvut.cz
-// Czech Technical University - Faculty of Information Technology
-// 2022
-//
-#ifndef ESP32_PUF_PUFLIB_H
-#define ESP32_PUF_PUFLIB_H
+#ifndef ESP32_PUF_SEC_H
+#define ESP32_PUF_SEC_H
 
 #include <esp_attr.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 /**
  * Enum that indicates, if the PUF_RESPONSE and PUF_RESPONSE_LEN global variables are valid - RESPONSE_READY state
  * or if they were cleaned or not initialized at all - RESPONSE_CLEAN state.
  * The state is updated accordingly after calling puflib functions.
  */
-enum PufState {RESPONSE_CLEAN, RESPONSE_READY};
+enum PufState
+{
+    RESPONSE_CLEAN,
+    RESPONSE_READY
+};
 const extern enum PufState PUF_STATE;
 
 /**
@@ -71,7 +71,7 @@ void puflib_wake_up_stub(void);
 
 /**
  * Checks if puf is already enrolled and ecc data are in nvs
-*/
+ */
 bool is_puf_configured(void);
 
-#endif //ESP32_PUF_PUFLIB_H
+#endif // ESP32_PUF_SEC_H

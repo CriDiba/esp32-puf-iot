@@ -6,13 +6,12 @@
 
 #include "core/core.h" // Core_TaskStart
 
-#include "puflib.h" // puflib_init
+#include "puf_sec.h"
 
 #include "crypto/crypto.h"
 
 void app_main(void)
 {
-    /* puflib handler */
     puflib_init();
 
     /* initialization */

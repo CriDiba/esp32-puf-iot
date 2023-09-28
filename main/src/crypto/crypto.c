@@ -9,7 +9,7 @@
 #include "mbedtls/x509_csr.h"
 #include "esp_log.h"
 
-#include "puflib.h"
+#include "puf_sec.h"
 #include "define.h"
 #include "core/nvs.h"
 #include "core/core.h"

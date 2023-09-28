@@ -3,7 +3,7 @@
 #include "core/core.h"
 #include "crypto/crypto.h"
 #include "define.h"
-#include "puflib.h"
+#include "puf_sec.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

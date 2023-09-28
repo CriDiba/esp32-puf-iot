@@ -1,9 +1,3 @@
-//
-// Ondrej Stanicek
-// staniond@fit.cvut.cz
-// Czech Technical University - Faculty of Information Technology
-// 2022
-//
 #ifndef ESP32_PUF_ECC_H
 #define ESP32_PUF_ECC_H
 
@@ -46,7 +40,7 @@ void enroll_puf();
  * @param res_len length of the \p result array in bytes (needs to be len/8 because 8x repetition code is used)
  * @param the number of bits corrected
  */
-int correct_data(const uint8_t* masked_data, const uint8_t* ecc_data, size_t len, uint8_t* result, size_t res_len);
+int correct_data(const uint8_t *masked_data, const uint8_t *ecc_data, size_t len, uint8_t *result, size_t res_len);
 
 /**
  * Applies the stable bit mask to the puf response - bits that have 0 bits in the mask are deleted.
@@ -61,4 +55,4 @@ int correct_data(const uint8_t* masked_data, const uint8_t* ecc_data, size_t len
 void apply_puf_mask(const uint8_t *mask, size_t mask_hw, uint8_t *puf_response,
                     size_t len, uint8_t *result, size_t res_len);
 
-#endif //ESP32_PUF_ECC_H
+#endif // ESP32_PUF_ECC_H

@@ -1,9 +1,3 @@
-//
-// Ondrej Stanicek
-// staniond@fit.cvut.cz
-// Czech Technical University - Faculty of Information Technology
-// 2022
-//
 #include <stdio.h>
 #include <math.h>
 #include <esp_system.h>

@@ -1,9 +1,3 @@
-//
-// Ondrej Stanicek
-// staniond@fit.cvut.cz
-// Czech Technical University - Faculty of Information Technology
-// 2022
-//
 #ifndef ESP32_PUF_NVS_H
 #define ESP32_PUF_NVS_H
 
@@ -18,8 +12,7 @@
  * @param blob buffer with the data to be saved to NVS
  * @param length length of the buffer in bytes
  */
-void set_blob(const uint8_t *blob, size_t length, const char* key);
-
+void set_blob(const uint8_t *blob, size_t length, const char *key);
 
 /**
  * Gets the blob data from NVS. This function returns false only when the blob data cannot be retrieved
@@ -32,4 +25,4 @@ bool get_blob(uint8_t **blob, size_t *length, const char *key);
 
 bool check_key(const char *key);
 
-#endif //ESP32_PUF_NVS_H
+#endif // ESP32_PUF_NVS_H

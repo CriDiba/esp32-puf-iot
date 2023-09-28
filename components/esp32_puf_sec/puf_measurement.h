@@ -1,9 +1,3 @@
-//
-// Ondrej Stanicek
-// staniond@fit.cvut.cz
-// Czech Technical University - Faculty of Information Technology
-// 2022
-//
 #ifndef ESP32_PUF_PUF_MEASUREMENT_H
 #define ESP32_PUF_PUF_MEASUREMENT_H
 
@@ -13,14 +7,24 @@
 #define RTC_FAST_MEMORY_ADDRESS (0x3FF80000)
 #define DATA_SRAM_MEMORY_ADDRESS (0x3FFB0000)
 
-enum STATE {NONE = 0, PROVISIONING, PUF_RESPONSE_RESET};
+enum STATE
+{
+    NONE = 0,
+    PROVISIONING,
+    PUF_RESPONSE_RESET
+};
 
-typedef struct {
+typedef struct
+{
     enum STATE state;
     int iteration_progress;
 } PuflibState;
 
-enum PufState {RESPONSE_CLEAN, RESPONSE_READY};
+enum PufState
+{
+    RESPONSE_CLEAN,
+    RESPONSE_READY
+};
 
 extern uint8_t PUF_BUFFER[PUF_MEMORY_SIZE];
 extern PuflibState PUFLIB_STATE;
@@ -48,13 +52,13 @@ void power_up_rtc_sram();
  * Backs up the contents of RTC fast memory to a buffer.
  * @return the buffer with the RTC fast memory backup
  */
-uint8_t* backup_rtc_sram();
+uint8_t *backup_rtc_sram();
 
 /**
  * Restores the RTC fast memory backup.
  * @param backup pass a pointer that was returned by the backup_rtc_sram function
  */
-void restore_rtc_sram(uint8_t* backup);
+void restore_rtc_sram(uint8_t *backup);
 
 /**
  * Powers the RTC fast memory down for \p sleep_us microseconds and then powers it up again.
@@ -90,4 +94,4 @@ void get_puf_response_reset();
 
 void clean_puf_response();
 
-#endif //ESP32_PUF_PUF_MEASUREMENT_H
+#endif // ESP32_PUF_PUF_MEASUREMENT_H
